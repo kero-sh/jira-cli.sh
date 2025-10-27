@@ -1,0 +1,18 @@
+# Archivos temporales
+*.tmp
+*~
+.*.swp
+.DS_Store
+
+# Archivos de configuración local (no commitear credenciales)
+.env
+.env.local
+config.local
+
+# Archivos de log
+*.log
+
+# Directorios de build/dist si se crean
+dist/
+build/
+
