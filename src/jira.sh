@@ -917,7 +917,7 @@ fi
 case "$JIRA_AUTH" in
   basic)
     if [[ -n "$JIRA_EMAIL" && -n "$JIRA_API_TOKEN" ]]; then
-      BASIC_TOKEN=$(printf "%s:%s" "$JIRA_EMAIL" "$JIRA_API_TOKEN" | base64)
+      BASIC_TOKEN=$(printf "%s:%s" "$JIRA_EMAIL" "$JIRA_API_TOKEN" | base64 | tr -d '\n')
       AUTH_HEADER="Authorization: Basic $BASIC_TOKEN"
     fi
     ;;
