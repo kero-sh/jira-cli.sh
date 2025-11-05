@@ -111,7 +111,9 @@ Generated branch types:
 - `bugfix/` - Normal bugs
 - `feature/` - Stories, improvements, epics
 - `task/` - Tasks
-- `chore/` - Maintenance
+- `chore/` - Maintenance, tech debt, support
+- `spike/` - Research, discovery, experiments
+- `release/` - Release candidate activities
 
 ### jira-search
 

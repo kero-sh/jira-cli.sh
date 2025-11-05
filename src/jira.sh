@@ -1364,10 +1364,35 @@ else
     curl_args+=(--data @"$FINAL_DATA_FILE")
   else
     if [[ -n "$DATA" ]]; then
-      if [[ -f "$DATA" ]]; then
-        curl_args+=(--data @"$DATA")
+      # For updates on API v3, convert plain string description to ADF automatically
+      if [[ "$METHOD" == "PUT" && "$ENDPOINT" =~ ^/issue/ ]]; then
+        _put_in_tmp=""
+        _put_src_file=""
+        if [[ -f "$DATA" ]]; then
+          _put_src_file="$DATA"
+        else
+          _put_in_tmp=$(mktemp)
+          printf '%s' "$DATA" > "$_put_in_tmp"
+          _put_src_file="$_put_in_tmp"
+        fi
+        _put_final=$(mktemp)
+        jq --arg api_ver "$JIRA_API_VERSION" '
+          if ($api_ver == "3") and (.fields | has("description")) and ((.fields.description | type) == "string") then
+            .fields.description = {
+              "type": "doc",
+              "version": 1,
+              "content": [
+                {"type": "paragraph", "content": [ {"type": "text", "text": .fields.description } ]}
+              ]
+            }
+          else . end' "$_put_src_file" > "$_put_final"
+        curl_args+=(--data @"$_put_final")
       else
-        curl_args+=(--data "$DATA")
+        if [[ -f "$DATA" ]]; then
+          curl_args+=(--data @"$DATA")
+        else
+          curl_args+=(--data "$DATA")
+        fi
       fi
     fi
   fi
