@@ -120,4 +120,10 @@ fi
 [ -n "$link_issue" ]  && update_payload $payload ".fields.issuelinks[0].outwardIssue.key" "$link_issue"
 
 
-[ -z "$issue_key" ] && $DIR/jira.sh POST issue --data $payload || $DIR/jira.sh PUT issue/$issue_key --data $payload
+# Use explicit REST endpoints to avoid misrouting 'issue' to the search resource
+# and call the main jira CLI entrypoint in this directory.
+if [ -z "$issue_key" ]; then
+  "$DIR/jira" POST /issue --data "$payload"
+else
+  "$DIR/jira" PUT /issue/"$issue_key" --data "$payload"
+fi

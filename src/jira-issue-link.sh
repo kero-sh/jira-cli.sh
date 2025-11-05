@@ -45,4 +45,4 @@ cat cat <<< "
 [ -n "$out" ]   && update_payload $payload ".issuelinks[0].outwardIssue.key" "$out"
 
 
-$DIR/jira.sh POST issueLink --data $payload
+"$DIR/jira" POST /issueLink --data "$payload"

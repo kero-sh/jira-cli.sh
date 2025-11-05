@@ -11,7 +11,7 @@ fi
 # Simple URL encoding for spaces and special characters
 query=$(echo "$query" | sed 's/ /%20/g' | sed 's/=/%3D/g' | sed 's/&/%26/g')
 
-$DIR/jira.sh GET "search?jql=$query" | jq '
+$DIR/jira GET "/search?jql=$query" | jq '
     .issues[] | {
         key: .key,
         summary: .fields.summary,
