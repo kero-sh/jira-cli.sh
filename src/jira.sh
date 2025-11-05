@@ -166,7 +166,7 @@ VARIABLES DE ENTORNO:
 EJEMPLOS:
   # Sintaxis simplificada
   jira priority --output table
-  jira project andes --output json
+  jira project CORE --output json
   jira issue ABC-123
   jira issue ABC-123 --transitions
   jira issue ABC-123 --transitions --to 611
@@ -179,7 +179,7 @@ EJEMPLOS:
 
   # Sintaxis tradicional
   jira GET /priority --output table
-  jira GET /project/andes
+  jira GET /project/CORE
   jira GET '/search?jql=assignee=currentUser()'
   jira POST /issue --data '{"fields":{"summary":"Test"}}'
 
@@ -861,7 +861,7 @@ fi
 if [[ -z "$ENDPOINT" ]]; then
   echo "Debes especificar el endpoint o recurso" >&2
   echo "Ejemplos:" >&2
-  echo "  jira project andes" >&2
+  echo "  jira project CORE" >&2
   echo "  jira issue ABC-123" >&2
   echo "  jira search 'assignee=currentUser()'" >&2
   echo "  jira create --data ./payload.json" >&2
@@ -917,7 +917,7 @@ fi
 case "$JIRA_AUTH" in
   basic)
     if [[ -n "$JIRA_EMAIL" && -n "$JIRA_API_TOKEN" ]]; then
-      BASIC_TOKEN=$(printf "%s:%s" "$JIRA_EMAIL" "$JIRA_API_TOKEN" | base64)
+      BASIC_TOKEN=$(printf "%s:%s" "$JIRA_EMAIL" "$JIRA_API_TOKEN" | base64 | tr -d '\n')
       AUTH_HEADER="Authorization: Basic $BASIC_TOKEN"
     fi
     ;;
