@@ -1,6 +1,28 @@
 #!/bin/bash
 DIR="$( cd "$( dirname $(realpath ${BASH_SOURCE[0]} ))" && pwd )";
 
+usage() {
+    cat <<EOF
+Uso: $(basename "$0") [options] '<jql_query>'
+
+Descripción:
+  Busca issues en Jira usando una consulta JQL.
+
+Opciones:
+  -h, --help         Muestra esta ayuda
+
+Ejemplos:
+  $(basename "$0") 'project=PROY AND status=Open'
+  $(basename "$0") 'assignee=currentUser() AND statusCategory!=Done'
+EOF
+    exit 0
+}
+
+# Check for help flag
+if [[ "$1" =~ ^(-h|--help)$ ]]; then
+    usage
+fi
+
 query="$1"
 if [[ -z "$query" ]]; then
     echo "Uso: $0 '<jql_query>'"

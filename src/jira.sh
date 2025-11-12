@@ -108,6 +108,7 @@ RECURSOS DISPONIBLES:
   project [id]       - Obtiene proyecto(s). Sin ID lista todos
   issue [key]        - Obtiene issue(s). Sin key lista los asignados
                        Con --transitions muestra transiciones disponibles
+  issue-for-branch [key] - Obtiene datos de un issue para crear una rama (campos limitados)
   search [jql]       - Busca con JQL. Sin JQL busca asignados a ti
   create             - Crea un issue (usa --data)
   priority           - Lista todas las prioridades
@@ -243,6 +244,151 @@ Notas:
     incluyendo el rango de fechas.
   - Con --states / --list la agrupación es por statusCategory (gris/azul/verde).
     Las listas incluyen: key, project, summary, statusCategory, labels, components y epic (si está en customfield_10014).
+EOF
+}
+
+# Help for 'jira project'
+show_help_project() {
+  cat << EOF
+Uso: jira project [id] [opciones]
+
+Descripción:
+  Obtiene información de proyecto(s). Sin ID lista todos los proyectos disponibles.
+
+Opciones:
+  --output FORMAT    Formato de salida: json, csv, table, yaml, md
+  -h, --help         Muestra esta ayuda
+
+Ejemplos:
+  jira project                    # Lista todos los proyectos
+  jira project CORE               # Obtiene el proyecto CORE
+  jira project --output table     # Lista en formato tabla
+EOF
+}
+
+# Help for 'jira issue'
+show_help_issue() {
+  cat << EOF
+Uso: jira issue [key] [opciones]
+
+Descripción:
+  Obtiene información de issue(s). Sin key lista los asignados a ti.
+  Con --transitions muestra transiciones disponibles.
+
+Opciones:
+  --transitions      Muestra transiciones disponibles
+  --to ID            ID de transición a aplicar (requiere --transitions)
+  --output FORMAT    Formato de salida: json, csv, table, yaml, md
+  -h, --help         Muestra esta ayuda
+
+Ejemplos:
+  jira issue                      # Lista issues asignados a ti
+  jira issue ABC-123              # Obtiene el issue ABC-123
+  jira issue ABC-123 --transitions # Muestra transiciones disponibles
+  jira issue ABC-123 --transitions --to 611  # Ejecuta transición
+EOF
+}
+
+# Help for 'jira search'
+show_help_search() {
+  cat << EOF
+Uso: jira search [jql] [opciones]
+
+Descripción:
+  Busca issues con JQL. Sin JQL busca issues asignados a ti.
+
+Opciones:
+  --output FORMAT    Formato de salida: json, csv, table, yaml, md
+  --csv-export TYPE  Para csv: modo de exportación (all|current)
+  -h, --help         Muestra esta ayuda
+
+Ejemplos:
+  jira search                                    # Issues asignados a ti
+  jira search 'project=ABC AND status=Open'     # Búsqueda con JQL
+  jira search 'assignee=currentUser()' --output md
+EOF
+}
+
+# Help for 'jira create'
+show_help_create() {
+  cat << EOF
+Uso: jira create [opciones]
+
+Descripción:
+  Crea un nuevo issue en Jira.
+
+Opciones:
+  --data '{json}'    Datos JSON para crear (también acepta ruta a archivo)
+  --project KEY      Clave de proyecto (ej: ABC)
+  --summary TEXT     Resumen/título del issue
+  --description TXT  Descripción del issue
+  --type NAME        Tipo de issue (ej: Task, Bug)
+  --assignee NAME    Usuario asignado (username)
+  --reporter NAME    Usuario reportero (username)
+  --priority NAME    Prioridad por nombre (ej: High)
+  --epic KEY         Epic Link (customfield_10100)
+  --link-issue KEY   Vincula a otro issue
+  --template FILE    Plantilla JSON base
+  -h, --help         Muestra esta ayuda
+
+Ejemplos:
+  jira create --data '{"fields":{"project":{"key":"ABC"},"summary":"Test","issuetype":{"name":"Task"}}}'
+  jira create --data ./payload.json
+  jira create --project ABC --summary "Title" --type Task
+EOF
+}
+
+# Help for 'jira priority'
+show_help_priority() {
+  cat << EOF
+Uso: jira priority [opciones]
+
+Descripción:
+  Lista todas las prioridades disponibles.
+
+Opciones:
+  --output FORMAT    Formato de salida: json, csv, table, yaml, md
+  -h, --help         Muestra esta ayuda
+
+Ejemplos:
+  jira priority
+  jira priority --output table
+EOF
+}
+
+# Help for 'jira status'
+show_help_status() {
+  cat << EOF
+Uso: jira status [opciones]
+
+Descripción:
+  Lista todos los estados disponibles.
+
+Opciones:
+  --output FORMAT    Formato de salida: json, csv, table, yaml, md
+  -h, --help         Muestra esta ayuda
+
+Ejemplos:
+  jira status
+  jira status --output table
+EOF
+}
+
+# Help for 'jira issuetype'
+show_help_issuetype() {
+  cat << EOF
+Uso: jira issuetype [opciones]
+
+Descripción:
+  Lista todos los tipos de issue disponibles.
+
+Opciones:
+  --output FORMAT    Formato de salida: json, csv, table, yaml, md
+  -h, --help         Muestra esta ayuda
+
+Ejemplos:
+  jira issuetype
+  jira issuetype --output table
 EOF
 }
 
@@ -523,6 +669,15 @@ build_endpoint() {
         ENDPOINT="/search?jql=assignee=currentUser()"
       fi
       ;;
+    issue-for-branch)
+      if [[ -n "$identifier" ]]; then
+        local fields="summary,issuetype,priority,status,resolution"
+        ENDPOINT="/issue/$identifier?fields=$fields"
+      else
+        echo "Error: issue-for-branch requires an issue key" >&2
+        exit 1
+      fi
+      ;;
     search)
       if [[ -n "$identifier" ]]; then
         # Si el identificador ya contiene JQL, usarlo directamente
@@ -685,17 +840,33 @@ for ((i=0; i<${#temp_args[@]}; i++)); do
       USER_ACTIVITY_LIMIT="${temp_args[i+1]}"; ((i++)) ;;
     --dry-run)
       DRY_RUN=true ;;
-    --help)
-      show_help; exit 0 ;;
+    -h|--help)
+      # Don't show help immediately, let resource-specific help handle it
+      SHOW_HELP_FLAG=true ;;
     --shell)
       generate_completion "${temp_args[i+1]}"; exit 0 ;;
   esac
 done
 
+# If --help was used without a resource, show general help
+if [[ "$SHOW_HELP_FLAG" == "true" ]] && [[ $# -eq 0 ]]; then
+  show_help; exit 0
+fi
+
 # Help shortcuts: 'jira help <resource>' or 'jira <resource> -h/--help'
 if [[ $# -gt 0 ]] && [[ "$1" == "help" ]]; then
-  if [[ $# -gt 1 ]] && [[ "$2" =~ ^(user|users)$ ]]; then
-    show_help_user; exit 0
+  if [[ $# -gt 1 ]]; then
+    case "$2" in
+      user|users)       show_help_user; exit 0 ;;
+      project|projects) show_help_project; exit 0 ;;
+      issue|issues)     show_help_issue; exit 0 ;;
+      search)           show_help_search; exit 0 ;;
+      create)           show_help_create; exit 0 ;;
+      priority)         show_help_priority; exit 0 ;;
+      status)           show_help_status; exit 0 ;;
+      issuetype)        show_help_issuetype; exit 0 ;;
+      *)                show_help; exit 0 ;;
+    esac
   else
     show_help; exit 0
   fi
@@ -718,8 +889,17 @@ if [[ $# -gt 0 ]] && [[ "$1" =~ ^(GET|POST|PUT)$ ]]; then
       resource="$1"; shift
 
       # Soporte de ayuda específica por recurso
-      if [[ "$resource" =~ ^(user|users)$ ]] && [[ $# -gt 0 ]] && [[ "$1" =~ ^(-h|--help|help)$ ]]; then
-        show_help_user; exit 0
+      if [[ $# -gt 0 ]] && [[ "$1" =~ ^(-h|--help|help)$ ]]; then
+        case "$resource" in
+          user|users)       show_help_user; exit 0 ;;
+          project|projects) show_help_project; exit 0 ;;
+          issue|issues)     show_help_issue; exit 0 ;;
+          search)           show_help_search; exit 0 ;;
+          create)           show_help_create; exit 0 ;;
+          priority)         show_help_priority; exit 0 ;;
+          status)           show_help_status; exit 0 ;;
+          issuetype)        show_help_issuetype; exit 0 ;;
+        esac
       fi
 
       # Subcomandos para 'user'
@@ -761,8 +941,32 @@ elif [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
   # El siguiente argumento podría ser el identificador
   identifier=""
   # Ayuda por recurso
-  if [[ "$resource" =~ ^(user|users)$ ]] && [[ $# -gt 0 ]] && [[ "$1" =~ ^(-h|--help|help)$ ]]; then
-    show_help_user; exit 0
+  if [[ $# -gt 0 ]] && [[ "$1" =~ ^(-h|--help|help)$ ]]; then
+    case "$resource" in
+      user|users)       show_help_user; exit 0 ;;
+      project|projects) show_help_project; exit 0 ;;
+      issue|issues)     show_help_issue; exit 0 ;;
+      search)           show_help_search; exit 0 ;;
+      create)           show_help_create; exit 0 ;;
+      priority)         show_help_priority; exit 0 ;;
+      status)           show_help_status; exit 0 ;;
+      issuetype)        show_help_issuetype; exit 0 ;;
+    esac
+  fi
+  
+  # Also check if --help flag was set globally and we have a resource
+  if [[ "$SHOW_HELP_FLAG" == "true" ]]; then
+    case "$resource" in
+      user|users)       show_help_user; exit 0 ;;
+      project|projects) show_help_project; exit 0 ;;
+      issue|issues)     show_help_issue; exit 0 ;;
+      search)           show_help_search; exit 0 ;;
+      create)           show_help_create; exit 0 ;;
+      priority)         show_help_priority; exit 0 ;;
+      status)           show_help_status; exit 0 ;;
+      issuetype)        show_help_issuetype; exit 0 ;;
+      *)                show_help; exit 0 ;;
+    esac
   fi
 
   if [[ "$resource" =~ ^(user|users)$ ]] && [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
@@ -824,9 +1028,9 @@ while [[ $# -gt 0 ]]; do
         shift
       fi
       ;;
-    --help|--shell)
+    -h|--help|--shell)
       # Ya procesados en el primer pase
-      shift 2
+      shift
       ;;
     /*)
       if [[ "$USING_SIMPLIFIED_SYNTAX" == "true" ]]; then
@@ -842,6 +1046,12 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+# If help was requested without a resource context, show help now (before validations)
+if [[ "$SHOW_HELP_FLAG" == "true" ]] && [[ -z "$resource" ]]; then
+  show_help
+  exit 0
+fi
 
 # Validaciones específicas para argumentos de transición
 if [[ "$TRANSITION_TARGET_SET" == "true" ]]; then

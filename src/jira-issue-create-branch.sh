@@ -89,7 +89,7 @@ parse_arguments() {
                 if [[ -z "$ISSUE_KEY" ]]; then
                     ISSUE_KEY="$1"
                 else
-                    echo "Unknown option: $1"
+                    error "Unknown option: $1"
                     usage
                     exit 1
                 fi
@@ -99,48 +99,80 @@ parse_arguments() {
     done
 
     if [ -z "$ISSUE_KEY" ]; then
-        echo "Error: You must provide an issue key"
+        error "You must provide an issue key"
         usage
         exit 1
     fi
+    
+    # Normalize issue key to uppercase (JIRA API requires uppercase)
+    ISSUE_KEY=$(echo "$ISSUE_KEY" | tr '[:lower:]' '[:upper:]')
 }
 
 # ==================== JIRA ISSUE FUNCTIONS ====================
 
 fetch_jira_issue() {
     local issue_key="$1"
-    
-    if ! issue=$($DIR/jira-issue.sh --fields '{"key": .key,"summary": .fields.summary,"type": (.fields.issuetype.name // ""),"priority": (.fields.priority.name // ""),"status": .fields.status.name, "resolution": (.fields.resolution.name // empty)}' "$issue_key"); then
-        echo "Failed to retrieve issue $issue_key"
+    local issue_json=""
+
+    info "Retrieving issue $issue_key from JIRA..."
+    issue_json=$(jira issue-for-branch "$issue_key")
+
+    if [ -z "$issue_json" ] || [ "$issue_json" = "null" ]; then
+        error "Issue not found: $issue_key"
         exit 1
     fi
 
-    if [ -z "$issue" ] || [ "$issue" = "null" ]; then
-        echo "Issue not found: $issue_key"
+    # Sanitize JSON from control characters that break jq
+    issue_json=$(printf '%s' "$issue_json" | tr -d '\000-\010\b\013\014\016-\037\177')
+
+    info "Processing issue data..."
+    local flat_issue
+    flat_issue=$(echo "$issue_json" | jq -r --arg key "$issue_key" '{
+        key: $key,
+        summary: .fields.summary,
+        type: .fields.issuetype.name,
+        priority: .fields.priority.name,
+        status: .fields.status.name,
+        resolution: (.fields.resolution.name? // "")
+    }')
+
+    if [ $? -ne 0 ]; then
+        error "Failed to parse issue data for $issue_key"
+        error "JQ exit code: $?"
+        error "Received JSON:"
+        error "$issue_json"
         exit 1
     fi
-    
-    echo "$issue"
+
+    if [ -z "$flat_issue" ] || [ "$flat_issue" = "null" ]; then
+        error "Could not extract key fields from issue $issue_key"
+        exit 1
+    fi
+
+    echo "$flat_issue"
 }
 
 parse_issue_data() {
     local issue="$1"
     
     issue_key=$(echo "$issue" | jq -r '.key')
-    issue_summary=$(echo "$issue" | jq -r '.summary')
-    issue_type=$(echo "$issue" | jq -r '.type // empty')
-    issue_priority=$(echo "$issue" | jq -r '.priority // empty')
-    issue_status=$(echo "$issue" | jq -r '.status // empty')
-    issue_resolution=$(echo "$issue" | jq -r '.resolution // empty')
+    issue_summary=$(echo "$issue" | jq -r '(.summary // "")')
+    if [[ "$issue_summary" == "null" ]]; then
+        issue_summary=""
+    fi
+    issue_type=$(echo "$issue" | jq -r '(.type // "")')
+    issue_priority=$(echo "$issue" | jq -r '(.priority // "")')
+    issue_status=$(echo "$issue" | jq -r '(.status // "")')
+    issue_resolution=$(echo "$issue" | jq -r '(.resolution // "")')
 
     if [ -z "$issue_key" ] || [ "$issue_key" = "null" ]; then
-        echo "Issue not found"
+        error "Issue not found"
         exit 1
     fi
 
     # Warn if the ticket is closed (has a non-empty resolution)
     if [ -n "$issue_resolution" ] && [ "$issue_resolution" != "null" ]; then
-        warn "Ticket $issue_key is closed (resolution: $issue_resolution, status: $issue_status)"
+        warning "Ticket $issue_key is closed (resolution: $issue_resolution, status: $issue_status)"
     fi
 }
 
@@ -376,11 +408,11 @@ check_if_default_branch() {
     local default_branch=$(get_default_branch)
     
     if [ -n "$default_branch" ] && [ "$current_branch" = "$default_branch" ]; then
-        echo "❌ Error: Cannot rename the repository's default branch"
-        echo "Current branch: $current_branch (default branch)"
-        echo ""
-        echo "The repository's default branch should not be renamed."
-        echo "Please switch to another branch first."
+        error "Cannot rename the repository's default branch"
+        error "Current branch: $current_branch (default branch)"
+        error ""
+        error "The repository's default branch should not be renamed."
+        error "Please switch to another branch first."
         exit 1
     fi
 }
@@ -391,16 +423,16 @@ prompt_rename_confirmations() {
     local current_branch="$1"
     local new_branch_name="$2"
     
-    echo "Current branch: $current_branch"
-    echo "New name: $new_branch_name"
-    echo ""
+    info "Current branch: $current_branch"
+    info "New name: $new_branch_name"
+    info ""
     
     # Check protected branch
     if is_protected_branch "$current_branch"; then
-        echo "⚠️  WARNING: Branch '$current_branch' is protected"
-        echo ""
+        warning "Branch '$current_branch' is protected"
+        info ""
         if ! confirm "Are you SURE you want to rename this protected branch?"; then
-            echo "Operation cancelled"
+            info "Operation cancelled"
             exit 1
         fi
     fi
@@ -410,25 +442,25 @@ prompt_rename_confirmations() {
     local rename_remote=false
     
     if [ -n "$upstream" ]; then
-        echo ""
-        echo "The current branch has an upstream configured: $upstream"
+        info ""
+        info "The current branch has an upstream configured: $upstream"
         if confirm "Do you want to rename the remote branch as well?"; then
             rename_remote=true
         fi
     fi
     
     # Final confirmation
-    echo ""
-    echo "Operation summary:"
-    echo "  - Rename local branch: $current_branch -> $new_branch_name"
+    info ""
+    info "Operation summary:"
+    info "  - Rename local branch: $current_branch -> $new_branch_name"
     if [ "$rename_remote" = true ]; then
-        echo "  - Delete remote branch: $upstream"
-        echo "  - Create new remote branch: $new_branch_name"
+        info "  - Delete remote branch: $upstream"
+        info "  - Create new remote branch: $new_branch_name"
     fi
-    echo ""
+    info ""
     
     if ! confirm "Proceed with the rename?"; then
-        echo "Operation cancelled"
+        info "Operation cancelled"
         exit 1
     fi
     
@@ -441,41 +473,41 @@ execute_rename() {
     local upstream="$3"
     local current_branch="$4"
     
-    echo ""
-    echo "Renaming local branch..."
+    info ""
+    info "Renaming local branch..."
     if ! git branch -m "$new_branch_name"; then
-        echo "Error: Failed to rename local branch"
+        error "Failed to rename local branch"
         exit 1
     fi
     
-    echo "✓ Local branch renamed successfully"
+    success "Local branch renamed successfully"
     
     if [ "$rename_remote" = "true" ]; then
         local remote=$(echo "$upstream" | cut -d'/' -f1)
         
-        echo ""
-        echo "Deleting old remote branch..."
+        info ""
+        info "Deleting old remote branch..."
         if ! git push "$remote" --delete "$current_branch"; then
-            echo "⚠️  Warning: Failed to delete old remote branch"
-            echo "You can delete it manually with: git push $remote --delete $current_branch"
+            warning "Failed to delete old remote branch"
+            warning "You can delete it manually with: git push $remote --delete $current_branch"
         else
-            echo "✓ Old remote branch deleted"
+            success "Old remote branch deleted"
         fi
         
-        echo ""
-        echo "Creating new remote branch..."
+        info ""
+        info "Creating new remote branch..."
         if ! git push -u "$remote" "$new_branch_name"; then
-            echo "Error: Failed to create new remote branch"
-            echo "Local branch was renamed but remote failed"
+            error "Failed to create new remote branch"
+            error "Local branch was renamed but remote failed"
             exit 1
         fi
         
-        echo "✓ New remote branch created and set as upstream"
+        success "New remote branch created and set as upstream"
     fi
     
-    echo ""
-    echo "✓ Rename completed successfully"
-    echo "Current branch: $new_branch_name"
+    info ""
+    success "Rename completed successfully"
+    info "Current branch: $new_branch_name"
 }
 
 rename_branch() {
@@ -484,7 +516,7 @@ rename_branch() {
     local current_branch=$(git branch --show-current)
     
     if [ -z "$current_branch" ]; then
-        echo "Error: Failed to determine current branch"
+        error "Failed to determine current branch"
         exit 1
     fi
     

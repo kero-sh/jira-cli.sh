@@ -4,6 +4,32 @@ DIR="$( cd "$( dirname $(realpath ${BASH_SOURCE[0]} ))" && pwd )";
 
 source $DIR/../lib/helpers.sh
 
+usage() {
+    cat <<EOF
+Uso: $(basename "$0") <issue_key> [options]
+
+Descripción:
+  Transiciona un issue a través de múltiples estados hasta llegar a Done.
+
+Opciones:
+  -h, --help         Muestra esta ayuda
+
+Ejemplos:
+  $(basename "$0") ABC-123
+EOF
+    exit 0
+}
+
+# Check for help flag
+if [[ "$1" =~ ^(-h|--help)$ ]]; then
+    usage
+fi
+
+if [[ -z "$1" ]]; then
+    error "Debes especificar un issue key"
+    usage
+fi
+
 function next_transition() {
     local issue="$1"
     local transition="$2"

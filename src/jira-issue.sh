@@ -4,17 +4,33 @@ DIR="$( cd "$( dirname $(realpath ${BASH_SOURCE[0]} ))" && pwd )";
 JIRA_FIELDS='{"key": .key,"summary": .fields.summary,"description": .fields.description,"status": .fields.status.name}'
 
 function usage() {
-    echo "Uso: $0 [--ticket <issue_key>] [--fields <jsonpath>] [--user <username>] [--jsonpath=<jsonpath>] [--full] <issue_key>"
-    echo "  --ticket <issue_key>    Especifica la clave del issue de JIRA"
-    echo "  --fields <jsonpath>     Especifica los campos a mostrar en formato JSON"
-    echo "  --jsonpath=<jsonpath>   Alias para --fields"
-    echo "  --full                  Muestra todos los campos disponibles"
-    exit 1
+    cat <<EOF
+Uso: $(basename "$0") [options] [issue_key]
+
+Descripción:
+  Obtiene información detallada de un issue de JIRA.
+
+Opciones:
+  --ticket <issue_key>    Especifica la clave del issue de JIRA
+  --fields <jsonpath>     Especifica los campos a mostrar en formato JSON
+  --jsonpath=<jsonpath>   Alias para --fields
+  --full                  Muestra todos los campos disponibles
+  -h, --help              Muestra esta ayuda
+
+Ejemplos:
+  $(basename "$0") ABC-123
+  $(basename "$0") --ticket ABC-123 --fields '.key, .summary'
+  $(basename "$0") ABC-123 --full
+EOF
+    exit 0
 }
 
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        -h|--help)
+            usage
+            ;;
         --ticket)
             ISSUE_KEY="$2"
             shift 2
@@ -45,6 +61,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+JIRA_TOKEN="${JIRA_TOKEN:-$JIRA_API_TOKEN}"
+JIRA_HOST="${JIRA_HOST:-$JIRA_API_HOST}"
 
 
 # Variables de entorno requeridas: JIRA_TOKEN y JIRA_HOST

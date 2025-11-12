@@ -1,12 +1,33 @@
 #!/bin/bash
 DIR="$( cd "$( dirname $(realpath ${BASH_SOURCE[0]} ))" && pwd )";
 
+usage() {
+    cat <<EOF
+Uso: $(basename "$0") <inward_issue> <outward_issue> [options]
+
+Descripción:
+  Crea un enlace entre dos issues en Jira.
+
+Opciones:
+  --type <type>      Tipo de enlace (por defecto: "Relates")
+  -h, --help         Muestra esta ayuda
+
+Ejemplos:
+  $(basename "$0") ABC-123 ABC-456
+  $(basename "$0") ABC-123 ABC-456 --type Blocks
+EOF
+    exit 0
+}
+
 [ -z "$in" ] && in="$1"
 [ -z "$out" ] && out="$2"
 shift 2
 
 while [ $# -gt 0 ]; do
   case $1 in
+    -h|--help)
+      usage
+      ;;
     --type)
       type=$2
       shift 2

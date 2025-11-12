@@ -1,0 +1,8 @@
+{
+  "project": "MYPROJECT",
+  "type": "Bug",
+  "summary": "Error en el login del sistema",
+  "description": "Cuando un usuario intenta iniciar sesión, aparece un error 500 en el servidor.\n\nPasos para reproducir:\n1. Ir a la página de login\n2. Ingresar credenciales válidas\n3. Hacer clic en 'Iniciar Sesión'\n\nResultado esperado: El usuario debería poder acceder al sistema\nResultado actual: Se muestra un error 500",
+  "priority": "High",
+  "assignee": "john.doe"
+}
