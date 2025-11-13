@@ -30,8 +30,8 @@ if [[ -z "$query" ]]; then
     exit 1
 fi
 
-# Simple URL encoding for spaces and special characters
-query=$(echo "$query" | sed 's/ /%20/g' | sed 's/=/%3D/g' | sed 's/&/%26/g')
+# URL encoding completo usando jq para manejar todos los caracteres especiales
+query=$(jq -rn --arg s "$query" '$s|@uri')
 
 $DIR/jira GET "/search?jql=$query" | jq '
     .issues[] | {

@@ -46,6 +46,7 @@ SHOW_TRANSITIONS=false
 TRANSITION_TARGET=""
 TRANSITION_TARGET_SET=false
 CREATE_MODE=false
+PAGINATE=false
 # Flags para crear issues (se aplican si create/POST /issue)
 CREATE_PROJECT=""
 CREATE_SUMMARY=""
@@ -71,6 +72,13 @@ USER_ACTIVITY_STATES=false
 USER_ACTIVITY_LIST=false
 USER_ACTIVITY_LIST_ONLY=false
 USER_ACTIVITY_LIMIT=100
+
+# Subcommands/state for 'project'
+PROJECT_SUBCOMMAND=""
+
+# Subcommands/state for 'issue'
+ISSUE_SUBCOMMAND=""
+COMMENT_MESSAGE=""
 
 # Dependency checks (minimal, only when needed)
 require_cmd() { command -v "$1" >/dev/null 2>&1 || { error "Required command not found: $1"; exit 127; }; }
@@ -106,6 +114,7 @@ SINTAXIS:
 
 RECURSOS DISPONIBLES:
   project [id]       - Obtiene proyecto(s). Sin ID lista todos
+  project components <project> - Lista los componentes de un proyecto
   issue [key]        - Obtiene issue(s). Sin key lista los asignados
                        Con --transitions muestra transiciones disponibles
   issue-for-branch [key] - Obtiene datos de un issue para crear una rama (campos limitados)
@@ -129,6 +138,7 @@ OPCIONES:
   --host HOST        - URL de Jira (o usar \$JIRA_HOST)
   --output FORMAT    - Formato de salida: json, csv, table, yaml, md
   --csv-export TYPE  - Para search+csv: csv de Jira Cloud (all|current)
+  --paginate         - Para search: recorre todas las páginas de resultados automáticamente
   --transitions      - Para issue: muestra transiciones disponibles; con --to ID ejecuta transición
   --to ID            - ID de transición a aplicar cuando se usa --transitions
   --shell SHELL      - Genera script de autocompletado: bash, zsh
@@ -168,6 +178,7 @@ EJEMPLOS:
   # Sintaxis simplificada
   jira priority --output table
   jira project CORE --output json
+  jira project components PROJ
   jira issue ABC-123
   jira issue ABC-123 --transitions
   jira issue ABC-123 --transitions --to 611
@@ -250,10 +261,13 @@ EOF
 # Help for 'jira project'
 show_help_project() {
   cat << EOF
-Uso: jira project [id] [opciones]
+Uso: jira project [id|comando] [opciones]
 
 Descripción:
   Obtiene información de proyecto(s). Sin ID lista todos los proyectos disponibles.
+
+Comandos:
+  components <project>  Lista los componentes de un proyecto
 
 Opciones:
   --output FORMAT    Formato de salida: json, csv, table, yaml, md
@@ -263,6 +277,7 @@ Ejemplos:
   jira project                    # Lista todos los proyectos
   jira project CORE               # Obtiene el proyecto CORE
   jira project --output table     # Lista en formato tabla
+  jira project components PROJ    # Lista componentes del proyecto PROJ
 EOF
 }
 
@@ -270,14 +285,20 @@ EOF
 show_help_issue() {
   cat << EOF
 Uso: jira issue [key] [opciones]
+     jira issue comment [key] -m "mensaje" [opciones]
 
 Descripción:
   Obtiene información de issue(s). Sin key lista los asignados a ti.
   Con --transitions muestra transiciones disponibles.
+  Con 'comment' agrega un comentario al issue.
+
+Comandos:
+  comment [key]      Agrega un comentario al issue especificado
 
 Opciones:
   --transitions      Muestra transiciones disponibles
   --to ID            ID de transición a aplicar (requiere --transitions)
+  -m, --message      Mensaje del comentario (requerido para comment)
   --output FORMAT    Formato de salida: json, csv, table, yaml, md
   -h, --help         Muestra esta ayuda
 
@@ -286,6 +307,8 @@ Ejemplos:
   jira issue ABC-123              # Obtiene el issue ABC-123
   jira issue ABC-123 --transitions # Muestra transiciones disponibles
   jira issue ABC-123 --transitions --to 611  # Ejecuta transición
+  jira issue comment ABC-123 -m "Comentario aquí"  # Agrega comentario
+  echo "mensaje" | jira issue comment ABC-123 -m -  # Comentario desde pipe
 EOF
 }
 
@@ -300,12 +323,14 @@ Descripción:
 Opciones:
   --output FORMAT    Formato de salida: json, csv, table, yaml, md
   --csv-export TYPE  Para csv: modo de exportación (all|current)
+  --paginate         Recorre todas las páginas de resultados automáticamente
   -h, --help         Muestra esta ayuda
 
 Ejemplos:
   jira search                                    # Issues asignados a ti
   jira search 'project=ABC AND status=Open'     # Búsqueda con JQL
   jira search 'assignee=currentUser()' --output md
+  jira search 'project=ABC' --paginate          # Obtiene todos los resultados paginando
 EOF
 }
 
@@ -413,7 +438,7 @@ _jira_completion() {
     methods="GET POST PUT"
 
     # Opciones
-    opts="--data --token --host --output --csv-export --transitions --to --help --shell --project --summary --description --type --assignee --reporter --priority --epic --link-issue --template --dry-run"
+    opts="--data --token --host --output --csv-export --transitions --to --help --shell --project --summary --description --type --assignee --reporter --priority --epic --link-issue --template --dry-run -m --message"
 
     # Formatos de salida
     formats="json csv table yaml md"
@@ -433,6 +458,22 @@ _jira_completion() {
         user|users)
             local user_subs="get search activity -h --help"
             COMPREPLY=( $(compgen -W "${user_subs}" -- ${cur}) )
+            return 0
+            ;;
+        project|projects)
+            local project_subs="components -h --help"
+            COMPREPLY=( $(compgen -W "${project_subs}" -- ${cur}) )
+            return 0
+            ;;
+        issue|issues)
+            local issue_subs="comment --transitions --to -h --help"
+            COMPREPLY=( $(compgen -W "${issue_subs}" -- ${cur}) )
+            return 0
+            ;;
+        comment)
+            # Después de 'issue comment', sugerir opciones de comentario
+            local comment_opts="-m --message --output -h --help"
+            COMPREPLY=( $(compgen -W "${comment_opts}" -- ${cur}) )
             return 0
             ;;
         create)
@@ -539,6 +580,8 @@ _jira() {
         '--csv-export[Export CSV para search]:type:(all current)' \
         '--transitions[Mostrar transiciones disponibles]' \
         '--to[Aplicar transición con ID]:transition id' \
+        '-m[Mensaje del comentario]:message' \
+        '--message[Mensaje del comentario]:message' \
         '--shell[Generar autocompletado]:shell:(bash zsh)' \
         '--project[Clave de proyecto (key)]:project key' \
         '--summary[Resumen del issue]:summary' \
@@ -574,7 +617,9 @@ _jira() {
                     _message "ID o nombre del proyecto"
                     ;;
                 issue|issues)
-                    _message "Clave del issue (ej: ABC-123)"
+                    _values "issue subcommands" \
+                      'comment:Agregar comentario a un issue' \
+                      || _message "Clave del issue (ej: ABC-123)"
                     ;;
                 user|users)
                     _values "user subcommands" \
@@ -582,7 +627,10 @@ _jira() {
                       'search:Buscar usuarios por texto' \
                       'activity:Resumen de actividad del usuario'
                     ;;
-                component|components|version|versions)
+                components)
+                    _message "Clave del proyecto"
+                    ;;
+                component|version|versions)
                     _message "ID del recurso"
                     ;;
             esac
@@ -599,6 +647,8 @@ _jira() {
                 '--csv-export[Export CSV para search]:type:(all current)' \
                 '--transitions[Mostrar transiciones disponibles]' \
                 '--to[Aplicar transición con ID]:transition id' \
+                '-m[Mensaje del comentario]:message' \
+                '--message[Mensaje del comentario]:message' \
                 '--project[Clave de proyecto (key)]:project key' \
                 '--summary[Resumen del issue]:summary' \
                 '--description[Descripción del issue]:description' \
@@ -652,14 +702,33 @@ build_endpoint() {
 
   case "$resource" in
     project|projects)
-      if [[ -n "$identifier" ]]; then
+      if [[ "$PROJECT_SUBCOMMAND" == "components" ]]; then
+        # List components for a project
+        if [[ -n "$identifier" ]]; then
+          ENDPOINT="/project/$identifier/components"
+        else
+          echo "Error: 'jira project components' requiere una clave de proyecto" >&2
+          echo "Ejemplo: jira project components PROJ" >&2
+          exit 1
+        fi
+      elif [[ -n "$identifier" ]]; then
         ENDPOINT="/project/$identifier"
       else
         ENDPOINT="/project"
       fi
       ;;
     issue|issues)
-      if [[ -n "$identifier" ]]; then
+      if [[ "$ISSUE_SUBCOMMAND" == "comment" ]]; then
+        # Comando para agregar comentario
+        if [[ -n "$identifier" ]]; then
+          ENDPOINT="/issue/$identifier/comment"
+          METHOD="POST"
+        else
+          echo "Error: 'jira issue comment' requiere una clave de issue" >&2
+          echo "Ejemplo: jira issue comment ABC-123 -m 'Mensaje del comentario'" >&2
+          exit 1
+        fi
+      elif [[ -n "$identifier" ]]; then
         if [[ "$SHOW_TRANSITIONS" == "true" ]]; then
           ENDPOINT="/issue/$identifier/transitions"
         else
@@ -684,7 +753,10 @@ build_endpoint() {
         if [[ "$identifier" =~ ^jql= ]]; then
           ENDPOINT="/search?$identifier"
         else
-          ENDPOINT="/search?jql=$identifier"
+          # Codificar correctamente la consulta JQL para URL usando jq
+          local jql_encoded
+          jql_encoded=$(jq -rn --arg s "$identifier" '$s|@uri')
+          ENDPOINT="/search?jql=$jql_encoded"
         fi
       else
         ENDPOINT="/search?jql=assignee=currentUser()"
@@ -838,8 +910,12 @@ for ((i=0; i<${#temp_args[@]}; i++)); do
       USER_ACTIVITY_LIST_ONLY=true ;;
     --limit)
       USER_ACTIVITY_LIMIT="${temp_args[i+1]}"; ((i++)) ;;
+    -m|--message)
+      COMMENT_MESSAGE="${temp_args[i+1]}"; ((i++)) ;;
     --dry-run)
       DRY_RUN=true ;;
+    --paginate)
+      PAGINATE=true ;;
     -h|--help)
       # Don't show help immediately, let resource-specific help handle it
       SHOW_HELP_FLAG=true ;;
@@ -918,6 +994,38 @@ if [[ $# -gt 0 ]] && [[ "$1" =~ ^(GET|POST|PUT)$ ]]; then
             # Compatibilidad: 'jira user <texto>' => search
             identifier="$1"; shift ;;
         esac
+      elif [[ "$resource" =~ ^(project|projects)$ ]] && [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
+        # Subcomandos para 'project'
+        case "$1" in
+          components)
+            PROJECT_SUBCOMMAND="components"
+            shift
+            if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
+              identifier="$1"; shift
+            else
+              identifier=""
+            fi
+            ;;
+          *)
+            # Project key normal
+            identifier="$1"; shift ;;
+        esac
+      elif [[ "$resource" =~ ^(issue|issues)$ ]] && [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
+        # Subcomandos para 'issue'
+        case "$1" in
+          comment)
+            ISSUE_SUBCOMMAND="comment"
+            shift
+            if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
+              identifier="$1"; shift
+            else
+              identifier=""
+            fi
+            ;;
+          *)
+            # Issue key normal
+            identifier="$1"; shift ;;
+        esac
       else
         # Recurso genérico con identificador opcional
         if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
@@ -980,6 +1088,31 @@ elif [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
       *)
         identifier="$1"; shift ;;
     esac
+  elif [[ "$resource" =~ ^(project|projects)$ ]] && [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
+    case "$1" in
+      components)
+        PROJECT_SUBCOMMAND="components"
+        shift
+        if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
+          identifier="$1"; shift
+        fi
+        ;;
+      *)
+        identifier="$1"; shift ;;
+    esac
+  elif [[ "$resource" =~ ^(issue|issues)$ ]] && [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
+    # Subcomandos para 'issue'
+    case "$1" in
+      comment)
+        ISSUE_SUBCOMMAND="comment"
+        shift
+        if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
+          identifier="$1"; shift
+        fi
+        ;;
+      *)
+        identifier="$1"; shift ;;
+    esac
   else
     if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
       identifier="$1"; shift
@@ -1020,9 +1153,13 @@ while [[ $# -gt 0 ]]; do
       # Flag sin valor
       shift
       ;;
-    --data|--token|--host|--output|--csv-export|--transitions|--to|--project|--summary|--description|--type|--assignee|--reporter|--priority|--epic|--link-issue|--template|--from-date|--to-date|--lookback|--limit)
+    --paginate)
+      # Flag sin valor, ya procesado en el primer pase
+      shift
+      ;;
+    --data|--token|--host|--output|--csv-export|--transitions|--to|--project|--summary|--description|--type|--assignee|--reporter|--priority|--epic|--link-issue|--template|--from-date|--to-date|--lookback|--limit|-m|--message)
       # Ya procesados en el primer pase, saltarlos
-      if [[ "$1" =~ ^--(data|token|host|output|csv-export|to|project|summary|description|type|assignee|reporter|priority|epic|link-issue|template|from-date|to-date|lookback|limit)$ ]]; then
+      if [[ "$1" =~ ^--(data|token|host|output|csv-export|to|project|summary|description|type|assignee|reporter|priority|epic|link-issue|template|from-date|to-date|lookback|limit|message)$ ]] || [[ "$1" == "-m" ]]; then
         shift 2
       else
         shift
@@ -1572,6 +1709,65 @@ else
   if [[ "$CREATE_MODE" == "true" || ( "$METHOD" == "POST" && "$ENDPOINT" == "/issue" ) ]]; then
     FINAL_DATA_FILE=$(prepare_create_payload)
     curl_args+=(--data @"$FINAL_DATA_FILE")
+  elif [[ "$ISSUE_SUBCOMMAND" == "comment" && "$METHOD" == "POST" ]]; then
+    # Construir payload para comentario
+    if [[ -z "$COMMENT_MESSAGE" ]]; then
+      echo "Error: Se requiere un mensaje para el comentario. Usa -m o --message" >&2
+      echo "Ejemplo: jira issue comment ABC-123 -m 'Mensaje del comentario'" >&2
+      echo "         echo 'mensaje' | jira issue comment ABC-123 -m -" >&2
+      exit 1
+    fi
+    
+    # Leer desde stdin si el mensaje es "-"
+    if [[ "$COMMENT_MESSAGE" == "-" ]]; then
+      if [[ -t 0 ]]; then
+        echo "Error: No hay datos en stdin. Usa un pipe o redirección." >&2
+        echo "Ejemplo: echo 'mensaje' | jira issue comment ABC-123 -m -" >&2
+        exit 1
+      fi
+      COMMENT_MESSAGE=$(cat)
+      # Eliminar nueva línea final si existe
+      COMMENT_MESSAGE="${COMMENT_MESSAGE%$'\n'}"
+    fi
+    
+    if [[ -z "$COMMENT_MESSAGE" ]]; then
+      echo "Error: El mensaje del comentario está vacío" >&2
+      exit 1
+    fi
+    
+    _comment_payload=$(mktemp)
+    if [[ "$JIRA_API_VERSION" == "3" ]]; then
+      # API v3 (Jira Cloud) usa formato ADF (Atlassian Document Format)
+      jq -n \
+        --arg msg "$COMMENT_MESSAGE" \
+        '{
+          "body": {
+            "type": "doc",
+            "version": 1,
+            "content": [
+              {
+                "type": "paragraph",
+                "content": [
+                  {
+                    "type": "text",
+                    "text": $msg
+                  }
+                ]
+              }
+            ]
+          }
+        }' > "$_comment_payload"
+    else
+      # API v2 (Jira Server/DC) usa texto plano
+      jq -n \
+        --arg msg "$COMMENT_MESSAGE" \
+        '{
+          "body": $msg
+        }' > "$_comment_payload"
+    fi
+    curl_args+=(--data @"$_comment_payload")
+    # Limpiar archivo temporal después de la ejecución
+    trap "rm -f '$_comment_payload'" EXIT
   else
     if [[ -n "$DATA" ]]; then
       # For updates on API v3, convert plain string description to ADF automatically
@@ -1607,8 +1803,98 @@ else
     fi
   fi
   
-  curl_args+=("$REQUEST_URL")
-  RESPONSE=$( execute_curl "${curl_args[@]}" )
+  # Manejar paginación para búsquedas
+  if [[ "$PAGINATE" == "true" ]] && [[ "$ENDPOINT" =~ ^/search\? ]]; then
+    # Extraer JQL codificado y otros parámetros del endpoint
+    jql_param=""
+    other_params=""
+    base_endpoint="/search"
+    
+    # Separar jql de otros parámetros
+    if [[ "$ENDPOINT" =~ jql=([^&]+) ]]; then
+      jql_param="${BASH_REMATCH[1]}"
+      # Extraer otros parámetros (si existen), excluyendo startAt y maxResults que manejaremos nosotros
+      if [[ "$ENDPOINT" =~ \&(.*)$ ]]; then
+        temp_params="${BASH_REMATCH[1]}"
+        # Filtrar startAt y maxResults si existen
+        other_params=$(printf '%s' "$temp_params" | sed 's/[&?]startAt=[^&]*//g' | sed 's/[&?]maxResults=[^&]*//g' | sed 's/^&//')
+        [[ -n "$other_params" ]] && other_params="&${other_params}"
+      fi
+    fi
+    
+    if [[ -z "$jql_param" ]]; then
+      error "No se pudo extraer JQL del endpoint para paginación"
+      exit 1
+    fi
+    
+    # Parámetros de paginación
+    start_at=0
+    max_results=100
+    all_issues=()
+    first_response=""
+    total_results=0
+    
+    # Bucle de paginación
+    while true; do
+      # Construir URL con paginación usando el JQL ya codificado
+      paginated_endpoint="${base_endpoint}?jql=${jql_param}&startAt=${start_at}&maxResults=${max_results}${other_params}"
+      paginated_url="$JIRA_HOST/rest/api/${JIRA_API_VERSION}${paginated_endpoint}"
+      
+      # Ejecutar consulta
+      page_response=$(execute_curl "${curl_args[@]}" "$paginated_url")
+      
+      # Verificar si hay error
+      if ! printf '%s' "$page_response" | jq -e '.' >/dev/null 2>&1; then
+        error "Error en la respuesta de la API"
+        printf '%s' "$page_response" >&2
+        exit 1
+      fi
+      
+      # Guardar primera respuesta para metadatos
+      if [[ -z "$first_response" ]]; then
+        first_response="$page_response"
+        total_results=$(printf '%s' "$page_response" | jq -r '.total // 0')
+      fi
+      
+      # Extraer issues de esta página
+      page_issues=$(printf '%s' "$page_response" | jq -c '.issues[]? // empty')
+      
+      if [[ -z "$page_issues" ]]; then
+        break
+      fi
+      
+      # Acumular issues
+      while IFS= read -r issue; do
+        [[ -n "$issue" ]] && all_issues+=("$issue")
+      done <<< "$page_issues"
+      
+      # Verificar si hay más páginas
+      current_count=$(printf '%s' "$page_response" | jq -r '.issues | length')
+      current_start_at=$(printf '%s' "$page_response" | jq -r '.startAt // 0')
+      
+      if [[ "$current_count" -lt "$max_results" ]] || [[ $((current_start_at + current_count)) -ge "$total_results" ]]; then
+        break
+      fi
+      
+      start_at=$((start_at + max_results))
+    done
+    
+    # Combinar todos los issues en una sola respuesta
+    if [[ ${#all_issues[@]} -gt 0 ]]; then
+      # Usar archivo temporal para evitar "Argument list too long"
+      issues_temp=$(mktemp)
+      printf '%s\n' "${all_issues[@]}" | jq -s '.' > "$issues_temp"
+      first_temp=$(mktemp)
+      printf '%s' "$first_response" > "$first_temp"
+      RESPONSE=$(jq --slurpfile issues "$issues_temp" '.issues = $issues[0] | .startAt = 0 | .maxResults = ($issues[0] | length)' "$first_temp")
+      rm -f "$issues_temp" "$first_temp"
+    else
+      RESPONSE="$first_response"
+    fi
+  else
+    curl_args+=("$REQUEST_URL")
+    RESPONSE=$( execute_curl "${curl_args[@]}" )
+  fi
 fi
 
 # Para transiciones que responden 204 (sin cuerpo), generar mensaje útil

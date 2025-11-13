@@ -201,7 +201,15 @@ determine_branch_prefix() {
         task|tarea|sub-task|subtask|story-task|technical-task|"solicitud de identidad en aws")
             prefix="task"
             ;;
-        chore|maintenance|maintenance-task|mantenimiento|support-task|operacion|soporte|"deuda tecnica"|kaizen)
+        support|support-task|soporte)
+            # For support tickets, treat as fixes by default; escalate to hotfix for critical priorities
+            if [[ " $critical_priorities " == *" $priority_norm "* ]]; then
+                prefix="hotfix"
+            else
+                prefix="fix"
+            fi
+            ;;
+        chore|maintenance|maintenance-task|mantenimiento|operacion|"deuda tecnica"|kaizen)
             prefix="chore"
             ;;
         story|user-story|feature|improvement|enhancement|epic|historia|mejora|mejoras|feature-request|"historia funcional"|"historia tecnica"|"collocated design")
@@ -222,7 +230,14 @@ determine_branch_prefix() {
                 fi
             elif [[ "$type_norm" == *"task"* ]]; then
                 prefix="task"
-            elif [[ "$type_norm" == *"mainten"* || "$type_norm" == *"oper"* || "$type_norm" == *"soport"* || "$type_norm" == *"deuda"* ]]; then
+            elif [[ "$type_norm" == *"soport"* ]]; then
+                # any type containing "soport" (soporte/support) defaults to fix; hotfix if critical
+                if [[ " $critical_priorities " == *" $priority_norm "* ]]; then
+                    prefix="hotfix"
+                else
+                    prefix="fix"
+                fi
+            elif [[ "$type_norm" == *"mainten"* || "$type_norm" == *"oper"* || "$type_norm" == *"deuda"* ]]; then
                 prefix="chore"
             else
                 prefix="feature"
@@ -549,6 +564,8 @@ main() {
 
     if [ -z "$BRANCH_SUMMARY" ] || [ -z "$BRANCH_PREFIX" ]; then
         issue=$(fetch_jira_issue "$ISSUE_KEY")
+        # In case any informational logs leaked to stdout, keep only the JSON payload
+        issue=$(printf '%s\n' "$issue" | sed -n '/^{/,$p')
         parse_issue_data "$issue"
     fi
 

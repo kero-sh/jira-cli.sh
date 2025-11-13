@@ -57,6 +57,7 @@ echo "Testing jira resources with help:"
 test_help "jira project --help" "bash $SRC_DIR/jira.sh project --help"
 test_help "jira project -h" "bash $SRC_DIR/jira.sh project -h"
 test_help "jira help project" "bash $SRC_DIR/jira.sh help project"
+test_help "jira project components (no project)" "bash $SRC_DIR/jira.sh project components 2>&1 | grep -q 'requiere'"
 
 test_help "jira issue --help" "bash $SRC_DIR/jira.sh issue --help"
 test_help "jira issue -h" "bash $SRC_DIR/jira.sh issue -h"
