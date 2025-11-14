@@ -74,6 +74,8 @@ EOF
 chmod 600 ~/.jirarc
 ```
 
+**Important**: For Jira Cloud with Personal Access Tokens (PAT), **both `JIRA_EMAIL` and `JIRA_API_TOKEN` are required**. PATs (tokens starting with `ATATT`) use Basic Authentication and need your email to work correctly.
+
 Then, load this configuration in your shell:
 
 ```bash
@@ -87,7 +89,7 @@ Then, load this configuration in your shell:
 2. Click "Create API token"
 3. Give it a descriptive name (e.g., "jira-cli")
 4. Copy the generated token
-5. Use it as `JIRA_API_TOKEN`
+5. Use it as `JIRA_API_TOKEN` (remember to also set `JIRA_EMAIL`)
 
 ### 4. Verify Installation
 
@@ -192,6 +194,19 @@ sudo apt-get install jq
 ```bash
 export JIRA_HOST="https://your-instance.atlassian.net"
 ```
+
+### Error: "Failed to parse Connect Session Auth Token" or "Issue does not exist or you do not have permission to see it"
+
+**Cause**: Missing `JIRA_EMAIL` when using Personal Access Token (PAT), or incorrect authentication method.
+
+**Solution**: PATs require **both** `JIRA_EMAIL` and `JIRA_API_TOKEN`:
+```bash
+export JIRA_EMAIL="your-email@example.com"
+export JIRA_API_TOKEN="ATATT3xFf..."  # Your PAT token
+export JIRA_HOST="https://your-instance.atlassian.net"
+```
+
+Do **not** use `JIRA_TOKEN` for PATs - that's only for OAuth Bearer tokens.
 
 ### Permission Error
 

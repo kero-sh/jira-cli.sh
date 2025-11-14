@@ -37,7 +37,9 @@ make install PREFIX=/usr/local  # Install to /usr/local/bin
 
 Configure the following environment variables:
 
-### Basic Authentication (Jira Cloud with API Token)
+### Basic Authentication (Recommended for Jira Cloud)
+
+Use this method with Personal Access Tokens (PAT) or API Tokens from Atlassian. **Both `JIRA_EMAIL` and `JIRA_API_TOKEN` are required**.
 
 ```bash
 export JIRA_HOST="https://your-instance.atlassian.net"
@@ -45,7 +47,11 @@ export JIRA_EMAIL="your-email@example.com"
 export JIRA_API_TOKEN="your-api-token"
 ```
 
+**Important**: Atlassian Personal Access Tokens (starting with `ATATT`) must use Basic Authentication. Make sure to set both `JIRA_EMAIL` and `JIRA_API_TOKEN` variables.
+
 ### OAuth/Bearer Authentication
+
+Use this method only for OAuth tokens (not for PAT):
 
 ```bash
 export JIRA_HOST="https://your-instance.atlassian.net"
