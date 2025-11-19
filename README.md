@@ -75,12 +75,17 @@ Main Jira API client. Supports traditional and simplified syntax.
 # Simplified syntax
 jira priority --output table
 jira project PROJECT-123
+jira project components PROJECT-123
+jira project statuses PROJECT-123
+jira workflow --output table
 jira issue ABC-123
 jira search 'project=ABC AND status=Open'
 jira create --project ABC --summary "Title" --description "Desc" --type Task
 
 # Traditional syntax
 jira GET /priority
+jira GET /project/PROJECT-123/statuses
+jira GET /workflow
 jira POST /issue --data payload.json
 ```
 
@@ -267,6 +272,23 @@ jira search 'labels=backend AND status="In Progress"'
 
 # Issues updated this week
 jira search 'updated >= -1w AND assignee=currentUser()'
+```
+
+### Working with Workflows
+
+```bash
+# List all workflows in your Jira instance
+jira workflow --output table
+
+# Get workflows/statuses by issue type for a specific project
+jira project statuses PROJECT-KEY
+
+# Example: See what statuses are available for each issue type in project ABC
+jira project statuses ABC --output json
+
+# This will show you what workflows are configured for each issue type
+# (Bug, Task, Story, etc.) in the project, including all available statuses
+# and transitions for each issue type
 ```
 
 ## File Structure

@@ -115,6 +115,7 @@ SINTAXIS:
 RECURSOS DISPONIBLES:
   project [id]       - Obtiene proyecto(s). Sin ID lista todos
   project components <project> - Lista los componentes de un proyecto
+  project statuses <project>   - Obtiene workflows/estados por tipo de issue en un proyecto
   issue [key]        - Obtiene issue(s). Sin key lista los asignados
                        Con --transitions muestra transiciones disponibles
   issue-for-branch [key] - Obtiene datos de un issue para crear una rama (campos limitados)
@@ -122,6 +123,7 @@ RECURSOS DISPONIBLES:
   create             - Crea un issue (usa --data)
   priority           - Lista todas las prioridades
   status             - Lista todos los estados
+  workflow           - Lista todos los workflows
   user [username]    - Busca usuario(s)
   user get <term>    - Obtiene el perfil completo del usuario
   user search <term> - Busca usuarios por texto/email/username
@@ -179,6 +181,8 @@ EJEMPLOS:
   jira priority --output table
   jira project CORE --output json
   jira project components PROJ
+  jira project statuses PROJ
+  jira workflow --output table
   jira issue ABC-123
   jira issue ABC-123 --transitions
   jira issue ABC-123 --transitions --to 611
@@ -268,6 +272,7 @@ Descripción:
 
 Comandos:
   components <project>  Lista los componentes de un proyecto
+  statuses <project>    Obtiene workflows/estados por tipo de issue en un proyecto
 
 Opciones:
   --output FORMAT    Formato de salida: json, csv, table, yaml, md
@@ -278,6 +283,7 @@ Ejemplos:
   jira project CORE               # Obtiene el proyecto CORE
   jira project --output table     # Lista en formato tabla
   jira project components PROJ    # Lista componentes del proyecto PROJ
+  jira project statuses PROJ      # Obtiene workflows/estados del proyecto PROJ
 EOF
 }
 
@@ -396,6 +402,26 @@ Opciones:
 Ejemplos:
   jira status
   jira status --output table
+EOF
+}
+
+# Help for 'jira workflow'
+show_help_workflow() {
+  cat << EOF
+Uso: jira workflow [id] [opciones]
+
+Descripción:
+  Lista todos los workflows disponibles. Con ID obtiene un workflow específico.
+  Para obtener workflows por proyecto y tipo de issue, usa: jira project statuses <PROJECT>
+
+Opciones:
+  --output FORMAT    Formato de salida: json, csv, table, yaml, md
+  -h, --help         Muestra esta ayuda
+
+Ejemplos:
+  jira workflow                    # Lista todos los workflows
+  jira workflow --output table     # Lista en formato tabla
+  jira project statuses PROJ       # Obtiene workflows/estados por tipo de issue del proyecto PROJ
 EOF
 }
 
@@ -711,6 +737,15 @@ build_endpoint() {
           echo "Ejemplo: jira project components PROJ" >&2
           exit 1
         fi
+      elif [[ "$PROJECT_SUBCOMMAND" == "statuses" ]]; then
+        # Get workflows/statuses by issue type for a project
+        if [[ -n "$identifier" ]]; then
+          ENDPOINT="/project/$identifier/statuses"
+        else
+          echo "Error: 'jira project statuses' requiere una clave de proyecto" >&2
+          echo "Ejemplo: jira project statuses PROJ" >&2
+          exit 1
+        fi
       elif [[ -n "$identifier" ]]; then
         ENDPOINT="/project/$identifier"
       else
@@ -774,6 +809,15 @@ build_endpoint() {
     status|statuses)
       ENDPOINT="/status"
       ;;
+    workflow|workflows)
+      if [[ -n "$identifier" ]]; then
+        # Get specific workflow by ID
+        ENDPOINT="/workflow/$identifier"
+      else
+        # List all workflows
+        ENDPOINT="/workflow"
+      fi
+      ;;
     user|users)
       # Subcomandos: get | search | activity
       if [[ "$USER_MODE" == "get" ]]; then
@@ -829,7 +873,7 @@ build_endpoint() {
       ;;
     *)
       echo "Recurso no reconocido: $resource" >&2
-      echo "Recursos disponibles: project, issue, search, priority, status, user, issuetype, field, resolution, component, version" >&2
+      echo "Recursos disponibles: project, issue, search, priority, status, workflow, user, issuetype, field, resolution, component, version" >&2
       exit 1
       ;;
   esac
@@ -940,6 +984,7 @@ if [[ $# -gt 0 ]] && [[ "$1" == "help" ]]; then
       create)           show_help_create; exit 0 ;;
       priority)         show_help_priority; exit 0 ;;
       status)           show_help_status; exit 0 ;;
+      workflow)         show_help_workflow; exit 0 ;;
       issuetype)        show_help_issuetype; exit 0 ;;
       *)                show_help; exit 0 ;;
     esac
@@ -974,6 +1019,7 @@ if [[ $# -gt 0 ]] && [[ "$1" =~ ^(GET|POST|PUT)$ ]]; then
           create)           show_help_create; exit 0 ;;
           priority)         show_help_priority; exit 0 ;;
           status)           show_help_status; exit 0 ;;
+          workflow)         show_help_workflow; exit 0 ;;
           issuetype)        show_help_issuetype; exit 0 ;;
         esac
       fi
@@ -999,6 +1045,15 @@ if [[ $# -gt 0 ]] && [[ "$1" =~ ^(GET|POST|PUT)$ ]]; then
         case "$1" in
           components)
             PROJECT_SUBCOMMAND="components"
+            shift
+            if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
+              identifier="$1"; shift
+            else
+              identifier=""
+            fi
+            ;;
+          statuses)
+            PROJECT_SUBCOMMAND="statuses"
             shift
             if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
               identifier="$1"; shift
@@ -1058,6 +1113,7 @@ elif [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
       create)           show_help_create; exit 0 ;;
       priority)         show_help_priority; exit 0 ;;
       status)           show_help_status; exit 0 ;;
+      workflow)         show_help_workflow; exit 0 ;;
       issuetype)        show_help_issuetype; exit 0 ;;
     esac
   fi
@@ -1072,6 +1128,7 @@ elif [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
       create)           show_help_create; exit 0 ;;
       priority)         show_help_priority; exit 0 ;;
       status)           show_help_status; exit 0 ;;
+      workflow)         show_help_workflow; exit 0 ;;
       issuetype)        show_help_issuetype; exit 0 ;;
       *)                show_help; exit 0 ;;
     esac
@@ -1092,6 +1149,13 @@ elif [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
     case "$1" in
       components)
         PROJECT_SUBCOMMAND="components"
+        shift
+        if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
+          identifier="$1"; shift
+        fi
+        ;;
+      statuses)
+        PROJECT_SUBCOMMAND="statuses"
         shift
         if [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
           identifier="$1"; shift

@@ -39,8 +39,8 @@ normalize_for_match() {
 confirm() {
     local prompt="$1"
     local response
-    echo -n "$prompt (y/n): "
-    read -r response
+    echo -n "$prompt (y/n): " > /dev/tty
+    read -r response < /dev/tty
     case "$response" in
         [yY]|[yY][eE][sS]|[sS]|[sS][iI])
             return 0

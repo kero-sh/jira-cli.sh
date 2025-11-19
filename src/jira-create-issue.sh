@@ -203,22 +203,50 @@ build_payload() {
     elif [ "$format_flag" = "--adf" ]; then
       # Convert to ADF format for Jira Cloud using md2jira
       info "Converting Markdown to ADF format (Jira Cloud)..."
-      final_description=$(echo "$final_description" | "$DIR/../bin/md2jira" --adf 2>/dev/null)
+      local converted
+      converted=$(echo "$final_description" | "$DIR/../bin/md2jira" --adf 2>&1)
+      if [ $? -ne 0 ] || [ -z "$converted" ]; then
+        error "Failed to convert description to ADF format:"
+        error "$converted"
+        exit 1
+      fi
+      final_description="$converted"
       description_json_arg="--argjson"
     elif [ "$format_flag" = "--wiki" ]; then
       # Convert to Wiki Markup for Jira Server using md2jira
       info "Converting Markdown to Wiki Markup (Jira Server)..."
-      final_description=$(echo "$final_description" | "$DIR/../bin/md2jira" --wiki 2>/dev/null)
+      local converted
+      converted=$(echo "$final_description" | "$DIR/../bin/md2jira" --wiki 2>&1)
+      if [ $? -ne 0 ] || [ -z "$converted" ]; then
+        error "Failed to convert description to Wiki Markup:"
+        error "$converted"
+        exit 1
+      fi
+      final_description="$converted"
       description_json_arg="--arg"
     else
       # Auto-detect format based on JIRA_HOST
       if [[ "$JIRA_HOST" =~ atlassian\.net ]]; then
         info "Auto-detected: ADF format ( Jira Cloud)"
-        final_description=$(echo "$final_description" | "$DIR/../bin/md2jira" --adf 2>/dev/null)
+        local converted
+        converted=$(echo "$final_description" | "$DIR/../bin/md2jira" --adf 2>&1)
+        if [ $? -ne 0 ] || [ -z "$converted" ]; then
+          error "Failed to convert description to ADF format:"
+          error "$converted"
+          exit 1
+        fi
+        final_description="$converted"
         description_json_arg="--argjson"
       else
         info "Auto-detected: Wiki Markup format (Jira Server)"
-        final_description=$(echo "$final_description" | "$DIR/../bin/md2jira" --wiki 2>/dev/null)
+        local converted
+        converted=$(echo "$final_description" | "$DIR/../bin/md2jira" --wiki 2>&1)
+        if [ $? -ne 0 ] || [ -z "$converted" ]; then
+          error "Failed to convert description to Wiki Markup:"
+          error "$converted"
+          exit 1
+        fi
+        final_description="$converted"
         description_json_arg="--arg"
       fi
     fi
@@ -242,55 +270,107 @@ build_payload() {
   # Build the payload using jq with proper argument types
   if [ "$is_update" = "true" ]; then
     # For updates, only include fields that were explicitly provided
-    jq -n \
-      --arg project "$project" \
-      --arg issue_type "$issue_type" \
-      --arg summary "$summary" \
-      $description_json_arg description "$final_description" \
-      --arg assignee "$assignee" \
-      --arg reporter "$reporter" \
-      --arg epic "$epic" \
-      --arg priority "$priority" \
-      --arg link_issue "$link_issue" \
-      '
-      { fields: {} }
-      | if $project != "" then .fields.project = { key: $project } else . end
-      | if $issue_type != "" then .fields.issuetype = { name: $issue_type } else . end
-      | if $summary != "" then .fields.summary = $summary else . end
-      | if $description != "" then .fields.description = $description else . end
-      | if $assignee != "" then .fields.assignee = { name: $assignee } else . end
-      | if $reporter != "" then .fields.reporter = { name: $reporter } else . end
-      | if $epic != "" then .fields.customfield_10100 = $epic else . end
-      | if $priority != "" then .fields.priority = { name: $priority } else . end
-      | if $link_issue != "" then .update.issuelinks[0] = { add: { type: { name: "Relates" }, outwardIssue: { key: $link_issue } } } else . end
-      ' > "$payload_file"
+    if [ -n "$final_description" ] && [ -n "$description_json_arg" ]; then
+      jq -n \
+        --arg project "$project" \
+        --arg issue_type "$issue_type" \
+        --arg summary "$summary" \
+        $description_json_arg description "$final_description" \
+        --arg assignee "$assignee" \
+        --arg reporter "$reporter" \
+        --arg epic "$epic" \
+        --arg priority "$priority" \
+        --arg link_issue "$link_issue" \
+        '
+        { fields: {} }
+        | if $project != "" then .fields.project = { key: $project } else . end
+        | if $issue_type != "" then .fields.issuetype = { name: $issue_type } else . end
+        | if $summary != "" then .fields.summary = $summary else . end
+        | if $description != "" then .fields.description = $description else . end
+        | if $assignee != "" then .fields.assignee = { name: $assignee } else . end
+        | if $reporter != "" then .fields.reporter = { name: $reporter } else . end
+        | if $epic != "" then .fields.customfield_10100 = $epic else . end
+        | if $priority != "" then .fields.priority = { name: $priority } else . end
+        | if $link_issue != "" then .update.issuelinks[0] = { add: { type: { name: "Relates" }, outwardIssue: { key: $link_issue } } } else . end
+        ' > "$payload_file"
+    else
+      # No description case
+      jq -n \
+        --arg project "$project" \
+        --arg issue_type "$issue_type" \
+        --arg summary "$summary" \
+        --arg assignee "$assignee" \
+        --arg reporter "$reporter" \
+        --arg epic "$epic" \
+        --arg priority "$priority" \
+        --arg link_issue "$link_issue" \
+        '
+        { fields: {} }
+        | if $project != "" then .fields.project = { key: $project } else . end
+        | if $issue_type != "" then .fields.issuetype = { name: $issue_type } else . end
+        | if $summary != "" then .fields.summary = $summary else . end
+        | if $assignee != "" then .fields.assignee = { name: $assignee } else . end
+        | if $reporter != "" then .fields.reporter = { name: $reporter } else . end
+        | if $epic != "" then .fields.customfield_10100 = $epic else . end
+        | if $priority != "" then .fields.priority = { name: $priority } else . end
+        | if $link_issue != "" then .update.issuelinks[0] = { add: { type: { name: "Relates" }, outwardIssue: { key: $link_issue } } } else . end
+        ' > "$payload_file"
+    fi
   else
     # For new issues, include all required fields
-    jq -n \
-      --arg project "$project" \
-      --arg issue_type "$issue_type" \
-      --arg summary "$summary" \
-      $description_json_arg description "$final_description" \
-      --arg assignee "$assignee" \
-      --arg reporter "$reporter" \
-      --arg epic "$epic" \
-      --arg priority "$priority" \
-      --arg link_issue "$link_issue" \
-      '
-      {
-        fields: {
-          project: { key: $project },
-          issuetype: { name: $issue_type },
-          summary: $summary,
-          description: $description
+    # Build jq command dynamically to handle optional description
+    if [ -n "$final_description" ] && [ -n "$description_json_arg" ]; then
+      jq -n \
+        --arg project "$project" \
+        --arg issue_type "$issue_type" \
+        --arg summary "$summary" \
+        $description_json_arg description "$final_description" \
+        --arg assignee "$assignee" \
+        --arg reporter "$reporter" \
+        --arg epic "$epic" \
+        --arg priority "$priority" \
+        --arg link_issue "$link_issue" \
+        '
+        {
+          fields: {
+            project: { key: $project },
+            issuetype: { name: $issue_type },
+            summary: $summary,
+            description: $description
+          }
         }
-      }
-      | if $assignee != "" then .fields.assignee = { name: $assignee } else . end
-      | if $reporter != "" then .fields.reporter = { name: $reporter } else . end
-      | if $epic != "" then .fields.customfield_10100 = $epic else . end
-      | if $priority != "" then .fields.priority = { name: $priority } else . end
-      | if $link_issue != "" then .update.issuelinks[0] = { add: { type: { name: "Relates" }, outwardIssue: { key: $link_issue } } } else . end
-      ' > "$payload_file"
+        | if $assignee != "" then .fields.assignee = { name: $assignee } else . end
+        | if $reporter != "" then .fields.reporter = { name: $reporter } else . end
+        | if $epic != "" then .fields.customfield_10100 = $epic else . end
+        | if $priority != "" then .fields.priority = { name: $priority } else . end
+        | if $link_issue != "" then .update.issuelinks[0] = { add: { type: { name: "Relates" }, outwardIssue: { key: $link_issue } } } else . end
+        ' > "$payload_file"
+    else
+      # No description case
+      jq -n \
+        --arg project "$project" \
+        --arg issue_type "$issue_type" \
+        --arg summary "$summary" \
+        --arg assignee "$assignee" \
+        --arg reporter "$reporter" \
+        --arg epic "$epic" \
+        --arg priority "$priority" \
+        --arg link_issue "$link_issue" \
+        '
+        {
+          fields: {
+            project: { key: $project },
+            issuetype: { name: $issue_type },
+            summary: $summary
+          }
+        }
+        | if $assignee != "" then .fields.assignee = { name: $assignee } else . end
+        | if $reporter != "" then .fields.reporter = { name: $reporter } else . end
+        | if $epic != "" then .fields.customfield_10100 = $epic else . end
+        | if $priority != "" then .fields.priority = { name: $priority } else . end
+        | if $link_issue != "" then .update.issuelinks[0] = { add: { type: { name: "Relates" }, outwardIssue: { key: $link_issue } } } else . end
+        ' > "$payload_file"
+    fi
   fi
   
   echo "$payload_file"
