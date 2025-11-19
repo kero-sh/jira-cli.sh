@@ -1,0 +1,60 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Shell scripts should always use LF
+*.sh text eol=lf
+*.bash text eol=lf
+*.zsh text eol=lf
+
+# Documentation
+*.md text eol=lf
+*.txt text eol=lf
+LICENSE text eol=lf
+README text eol=lf
+
+# Configuration files
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+.editorconfig text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# Makefiles
+Makefile text eol=lf
+makefile text eol=lf
+*.mk text eol=lf
+
+# Binaries (treat as binary)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.gz binary
+*.tgz binary
+
+# Exclude from exports/archives
+.gitignore export-ignore
+.gitattributes export-ignore
+.github/ export-ignore
+test/ export-ignore
+tests/ export-ignore
+*.test.sh export-ignore
+.vscode/ export-ignore
+.idea/ export-ignore
+
+# Mark shell scripts as linguist language for GitHub
+*.sh linguist-language=Shell
+bin/* linguist-language=Shell
+src/*.sh linguist-language=Shell
+
+# Diff settings for shell scripts
+*.sh diff=bash
+*.bash diff=bash
+*.zsh diff=zsh
+
