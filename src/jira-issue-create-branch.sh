@@ -1,7 +1,15 @@
+#!/bin/bash
+
+DIR="$( cd "$( dirname $(realpath ${BASH_SOURCE[0]} ))" && pwd )";
+
+# Load common library (handles helpers.sh loading with fallbacks)
+# shellcheck source=/dev/null
+source "$DIR/../lib/common.sh"
+
 # ==================== USAGE ====================
 
 usage() {
-        cat <<EOF
+	cat <<EOF
 Usage: $(basename "$0") [options] <issue-key>
 
 Options:
@@ -25,10 +33,6 @@ Notes:
     - If the ticket is closed (has a resolution), a warning will be shown.
 EOF
 }
-#!/bin/bash
-
-DIR="$( cd "$( dirname $(realpath ${BASH_SOURCE[0]} ))" && pwd )";
-source $DIR/../lib/helpers.sh
 
 # ==================== UTILITY FUNCTIONS ====================
 

@@ -1,16 +1,9 @@
 #!/bin/bash
 DIR="$( cd "$( dirname $(realpath ${BASH_SOURCE[0]} ))" && pwd )";
 
-# Optional helpers: allow standalone usage if helpers.sh is missing
-if [[ -f "$DIR/../lib/helpers.sh" ]]; then
-  # shellcheck source=/dev/null
-  source "$DIR/../lib/helpers.sh"
-else
-  error() { echo "[ERROR] $*"; }
-  info()  { echo "[INFO]  $*"; }
-  warn()  { echo "[WARN]  $*"; }
-  success(){ echo "[OK]    $*"; }
-fi
+# Load common library (handles helpers.sh loading with fallbacks)
+# shellcheck source=/dev/null
+source "$DIR/../lib/common.sh"
 
 # Uso:
 # jira [GET|POST|PUT] /endpoint [--data '{json}'|/ruta/a/payload.json] [--token TOKEN] [--host HOST] [--output csv|json|table|yaml|md] [--csv-export all|current]

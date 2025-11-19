@@ -4,8 +4,11 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/../lib"
 
-# Source required libraries
-source "$LIB_DIR/helpers.sh"
+# Load common library (handles helpers.sh loading with fallbacks)
+# shellcheck source=/dev/null
+source "$LIB_DIR/common.sh"
+
+# Source other required libraries
 source "$LIB_DIR/markdown.sh"
 source "$LIB_DIR/markdown_to_adf.sh"
 

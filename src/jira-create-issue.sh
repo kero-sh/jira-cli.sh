@@ -1,7 +1,9 @@
 #!/bin/bash
 DIR="$( cd "$( dirname $(realpath "${BASH_SOURCE[0]}" ))" && pwd )";
 
-source "$DIR/../lib/helpers.sh"
+# Load common library (handles helpers.sh loading with fallbacks)
+# shellcheck source=/dev/null
+source "$DIR/../lib/common.sh"
 
 # --- Variable Defaults ---
 issue_key=""
