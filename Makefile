@@ -1,16 +1,15 @@
 # Makefile for jira-cli
-# Standard GNU structure
+# Self-contained installation
 
 PREFIX ?= $(HOME)/.local
-BINDIR = $(PREFIX)/bin
-LIBDIR = $(PREFIX)/lib/jira-cli
 SRCDIR = src
 LOCALBINDIR = bin
 LOCALLIBDIR = lib
 
-# Get list of executable scripts
+# Get list of executable scripts and libs
 SCRIPTS = $(wildcard $(LOCALBINDIR)/*)
-LIBS = $(wildcard $(LOCALLIBDIR)/*)
+LIBS = $(wildcard $(LOCALLIBDIR)/*.sh)
+SRC_SCRIPTS = $(wildcard $(SRCDIR)/*.sh)
 
 .PHONY: all install uninstall clean help test
 
@@ -22,45 +21,49 @@ help:
 	@echo "Usage:"
 	@echo "  make install         Install to $(PREFIX)"
 	@echo "  make install PREFIX=/usr/local"
-	@echo "                       Install to custom location"
+	@echo "                       Install to custom location (self-contained)"
 	@echo "  make uninstall       Uninstall from $(PREFIX)"
 	@echo "  make test            Verify dependencies"
 	@echo "  make clean           Clean temporary files"
 	@echo ""
-	@echo "Structure:"
-	@echo "  bin/    Executables (symbolic links)"
-	@echo "  src/    Source scripts (.sh)"
-	@echo "  lib/    Shared libraries"
-	@echo ""
 
 install: test-deps
-	@echo "Installing jira-cli to $(PREFIX)..."
-	@mkdir -p $(BINDIR)
-	@mkdir -p $(LIBDIR)/src
-	@mkdir -p $(LIBDIR)/lib
-	@echo "Copying source files..."
-	@cp -r $(SRCDIR)/* $(LIBDIR)/src/
-	@cp -r $(LOCALLIBDIR)/* $(LIBDIR)/lib/
-	@echo "Creating symbolic links in $(BINDIR)..."
-	@for script in $(LOCALBINDIR)/*; do \
-		name=$$(basename $$script); \
-		echo "  Installing: $$name"; \
-		ln -sf $(LIBDIR)/src/$${name}.sh $(BINDIR)/$$name; \
-		chmod +x $(LIBDIR)/src/$${name}.sh; \
-	done
-	@echo "Installation completed!"
+	@echo "Installing jira-cli to $(PREFIX) (self-contained)..."
+	@mkdir -p $(PREFIX)/bin
+	@mkdir -p $(PREFIX)/src
+	@mkdir -p $(PREFIX)/lib
+	@echo "Copying executables..."
+	@cp -r $(LOCALBINDIR)/* $(PREFIX)/bin/
+	@chmod +x $(PREFIX)/bin/*
+	@echo "Copying source scripts..."
+	@cp $(SRCDIR)/*.sh $(PREFIX)/src/
+	@chmod +x $(PREFIX)/src/*.sh
+	@echo "Copying libraries..."
+	@cp $(LOCALLIBDIR)/*.sh $(PREFIX)/lib/
 	@echo ""
-	@echo "Add $(BINDIR) to your PATH if not already included:"
-	@echo "  export PATH=\"$(BINDIR):\$$PATH\""
+	@echo "==> jira-cli has been installed successfully!"
+	@echo ""
+	@echo "To use jira-cli, add the following to your shell profile:"
+	@echo ""
+	@echo "  # For bash (~/.bashrc or ~/.bash_profile):"
+	@echo "  export PATH=\"$(PREFIX)/bin:\$$PATH\""
+	@echo ""
+	@echo "  # For zsh (~/.zshrc):"
+	@echo "  export PATH=\"$(PREFIX)/bin:\$$PATH\""
+	@echo ""
+	@echo "Then restart your shell or run:"
+	@echo "  source ~/.bashrc  # or source ~/.zshrc"
+	@echo ""
+	@echo "Verify installation with:"
+	@echo "  jira --help"
+	@echo ""
 
 uninstall:
 	@echo "Uninstalling jira-cli from $(PREFIX)..."
-	@for script in $(LOCALBINDIR)/*; do \
-		name=$$(basename $$script); \
-		rm -f $(BINDIR)/$$name; \
-		echo "  Removed: $$name"; \
-	done
-	@rm -rf $(LIBDIR)
+	@rm -rf $(PREFIX)/bin/jira*
+	@rm -rf $(PREFIX)/bin/md2jira
+	@rm -rf $(PREFIX)/src
+	@rm -rf $(PREFIX)/lib
 	@echo "Uninstallation completed!"
 
 test-deps:
