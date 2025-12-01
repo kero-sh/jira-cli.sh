@@ -38,6 +38,7 @@ CSV_EXPORT_MODE="all" # all|current para exportador oficial de Jira Cloud (solo 
 SHOW_TRANSITIONS=false
 TRANSITION_TARGET=""
 TRANSITION_TARGET_SET=false
+TRANSITION_SPEC=""
 CREATE_MODE=false
 PAGINATE=false
 # Flags para crear issues (se aplican si create/POST /issue)
@@ -68,6 +69,7 @@ USER_ACTIVITY_LIMIT=100
 
 # Subcommands/state for 'project'
 PROJECT_SUBCOMMAND=""
+PROJECT_WORKFLOW_ISSUETYPE=""
 
 # Subcommands/state for 'issue'
 ISSUE_SUBCOMMAND=""
@@ -109,6 +111,7 @@ RECURSOS DISPONIBLES:
   project [id]       - Obtiene proyecto(s). Sin ID lista todos
   project components <project> - Lista los componentes de un proyecto
   project statuses <project>   - Obtiene workflows/estados por tipo de issue en un proyecto
+  project <key> --workflow [issuetype] - Muestra workflow y transiciones para un tipo de issue
   issue [key]        - Obtiene issue(s). Sin key lista los asignados
                        Con --transitions muestra transiciones disponibles
   issue-for-branch [key] - Obtiene datos de un issue para crear una rama (campos limitados)
@@ -136,6 +139,7 @@ OPCIONES:
   --paginate         - Para search: recorre todas las páginas de resultados automáticamente
   --transitions      - Para issue: muestra transiciones disponibles; con --to ID ejecuta transición
   --to ID            - ID de transición a aplicar cuando se usa --transitions
+  --transition SPEC  - Para issue: aplica transición por ID, nombre de transición o nombre de estado destino
   --shell SHELL      - Genera script de autocompletado: bash, zsh
   --dry-run          - Imprime el comando curl en lugar de ejecutarlo
   --help             - Muestra esta ayuda
@@ -266,9 +270,11 @@ Descripción:
 Comandos:
   components <project>  Lista los componentes de un proyecto
   statuses <project>    Obtiene workflows/estados por tipo de issue en un proyecto
+  <project> --workflow [issuetype]  Muestra el workflow y transiciones de un tipo de issue específico
 
 Opciones:
   --output FORMAT    Formato de salida: json, csv, table, yaml, md
+  --workflow [issuetype]  Filtra el workflow por tipo de issue (ej: Task, Bug, Story)
   -h, --help         Muestra esta ayuda
 
 Ejemplos:
@@ -277,6 +283,8 @@ Ejemplos:
   jira project --output table     # Lista en formato tabla
   jira project components PROJ    # Lista componentes del proyecto PROJ
   jira project statuses PROJ      # Obtiene workflows/estados del proyecto PROJ
+  jira project ANDES --workflow Task   # Muestra el workflow para tipo Task en proyecto ANDES
+  jira project ANDES --workflow Story  # Muestra el workflow para tipo Story en proyecto ANDES
 EOF
 }
 
@@ -297,6 +305,7 @@ Comandos:
 Opciones:
   --transitions      Muestra transiciones disponibles
   --to ID            ID de transición a aplicar (requiere --transitions)
+  --transition SPEC  Aplica transición por ID, nombre de transición o nombre de estado destino
   -m, --message      Mensaje del comentario (requerido para comment)
   --output FORMAT    Formato de salida: json, csv, table, yaml, md
   -h, --help         Muestra esta ayuda
@@ -306,6 +315,9 @@ Ejemplos:
   jira issue ABC-123              # Obtiene el issue ABC-123
   jira issue ABC-123 --transitions # Muestra transiciones disponibles
   jira issue ABC-123 --transitions --to 611  # Ejecuta transición
+  jira issue ABC-123 --transition "Done"     # Cambia a estado Done (por nombre de estado)
+  jira issue ABC-123 --transition "Start Progress" # Por nombre de transición
+  jira issue ABC-123 --transition 31         # Por ID de transición
   jira issue comment ABC-123 -m "Comentario aquí"  # Agrega comentario
   echo "mensaje" | jira issue comment ABC-123 -m -  # Comentario desde pipe
 EOF
@@ -739,6 +751,16 @@ build_endpoint() {
           echo "Ejemplo: jira project statuses PROJ" >&2
           exit 1
         fi
+      elif [[ -n "$PROJECT_WORKFLOW_ISSUETYPE" ]]; then
+        # Get workflow for a specific issue type in project
+        if [[ -n "$identifier" ]]; then
+          ENDPOINT="/project/$identifier/statuses"
+          # El filtrado por issuetype se hará después de obtener la respuesta
+        else
+          echo "Error: 'jira project --workflow' requiere una clave de proyecto" >&2
+          echo "Ejemplo: jira project ANDES --workflow Task" >&2
+          exit 1
+        fi
       elif [[ -n "$identifier" ]]; then
         ENDPOINT="/project/$identifier"
       else
@@ -930,6 +952,17 @@ for ((i=0; i<${#temp_args[@]}; i++)); do
       CREATE_LINK_ISSUE="${temp_args[i+1]}"; ((i++)) ;;
     --template)
       CREATE_TEMPLATE="${temp_args[i+1]}"; ((i++)) ;;
+    --transition)
+      TRANSITION_SPEC="${temp_args[i+1]}"; ((i++)) ;;
+    --workflow)
+      # Flag opcional con valor
+      if [[ $((i+1)) -lt ${#temp_args[@]} && ! "${temp_args[i+1]}" =~ ^- ]]; then
+        PROJECT_WORKFLOW_ISSUETYPE="${temp_args[i+1]}"
+        ((i++))
+      else
+        PROJECT_WORKFLOW_ISSUETYPE="__ALL__"
+      fi
+      ;;
     # Opciones para 'user activity'
     --from-date)
       USER_ACTIVITY_FROM="${temp_args[i+1]}"; ((i++)) ;;
@@ -1214,9 +1247,9 @@ while [[ $# -gt 0 ]]; do
       # Flag sin valor, ya procesado en el primer pase
       shift
       ;;
-    --data|--token|--host|--output|--csv-export|--transitions|--to|--project|--summary|--description|--type|--assignee|--reporter|--priority|--epic|--link-issue|--template|--from-date|--to-date|--lookback|--limit|-m|--message)
+    --data|--token|--host|--output|--csv-export|--transitions|--to|--transition|--project|--summary|--description|--type|--assignee|--reporter|--priority|--epic|--link-issue|--template|--workflow|--from-date|--to-date|--lookback|--limit|-m|--message)
       # Ya procesados en el primer pase, saltarlos
-      if [[ "$1" =~ ^--(data|token|host|output|csv-export|to|project|summary|description|type|assignee|reporter|priority|epic|link-issue|template|from-date|to-date|lookback|limit|message)$ ]] || [[ "$1" == "-m" ]]; then
+      if [[ "$1" =~ ^--(data|token|host|output|csv-export|to|transition|project|summary|description|type|assignee|reporter|priority|epic|link-issue|template|workflow|from-date|to-date|lookback|limit|message)$ ]] || [[ "$1" == "-m" ]]; then
         shift 2
       else
         shift
@@ -1331,6 +1364,48 @@ case "$JIRA_AUTH" in
     fi
     ;;
 esac
+
+# Resolver --transition SPEC (por nombre de transición, nombre de estado o ID)
+if [[ -n "$TRANSITION_SPEC" ]]; then
+  if [[ ! "$resource" =~ ^(issue|issues)$ ]] || [[ -z "$identifier" ]]; then
+    echo "Error: --transition requiere 'jira issue <KEY>'" >&2
+    exit 1
+  fi
+
+  _transitions_url="$JIRA_HOST/rest/api/${JIRA_API_VERSION}/issue/$identifier/transitions"
+  _transitions_resp=$(execute_curl --request GET -H "Content-Type: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} "$_transitions_url")
+
+  # Intento 1: match exacto por id, nombre de transición o nombre de estado destino (case-insensitive)
+  _transition_id=$(printf '%s' "$_transitions_resp" | jq -r --arg s "$TRANSITION_SPEC" '
+    (.transitions // [])
+    | (map(select((.id == $s)
+                  or ((.name // "" | ascii_downcase) == ($s | ascii_downcase))
+                  or ((.to.name // "" | ascii_downcase) == ($s | ascii_downcase)))) | .[0].id) // empty')
+
+  # Intento 2: match parcial por nombre (si no hubo exacto)
+  if [[ -z "$_transition_id" ]]; then
+    _transition_id=$(printf '%s' "$_transitions_resp" | jq -r --arg s "$TRANSITION_SPEC" '
+      (.transitions // [])
+      | (map(select((.name // "" | ascii_downcase) | contains($s | ascii_downcase)
+                    or ((.to.name // "" | ascii_downcase) | contains($s | ascii_downcase)))) | .[0].id) // empty')
+  fi
+
+  if [[ -z "$_transition_id" ]]; then
+    echo "Error: No se encontró la transición '$TRANSITION_SPEC' para el issue $identifier" >&2
+    echo "Transiciones disponibles:" >&2
+    printf '%s' "$_transitions_resp" | jq -r '(.transitions // []) | map("- " + .id + " | " + .name + " -> " + (.to.name // "")) | .[]' >&2
+    exit 1
+  fi
+
+  TRANSITION_TARGET="$_transition_id"
+  TRANSITION_TARGET_SET=true
+  SHOW_TRANSITIONS=true
+  ENDPOINT="/issue/$identifier/transitions"
+  METHOD="POST"
+  if [[ -z "$DATA" ]]; then
+    DATA="{\"transition\":{\"id\":\"$TRANSITION_TARGET\"}}"
+  fi
+fi
 
 # Resolución previa para 'jira user get <term>'
 EARLY_RESPONSE=""
@@ -1990,12 +2065,81 @@ if [[ "$TRANSITION_TARGET_SET" == "true" ]]; then
   IS_SINGLE_OBJECT=true
 fi
 
+# Filtrar respuesta para --workflow [issuetype]
+if [[ -n "$PROJECT_WORKFLOW_ISSUETYPE" ]]; then
+  if [[ "$PROJECT_WORKFLOW_ISSUETYPE" == "__ALL__" ]]; then
+    # Mostrar todos los workflows con sus transiciones
+    RESPONSE=$(echo "$RESPONSE" | jq '[
+      .[] | 
+      {
+        issueType: .name,
+        issueTypeId: .id,
+        statuses: [
+          .statuses[] | 
+          {
+            name: .name,
+            id: .id,
+            statusCategory: .statusCategory.name,
+            transitions: [
+              (.untranslatedName // .name) as $currentStatus |
+              $currentStatus
+            ]
+          }
+        ]
+      }
+    ]')
+  else
+    # Filtrar por tipo de issue específico
+    RESPONSE=$(echo "$RESPONSE" | jq --arg issuetype "$PROJECT_WORKFLOW_ISSUETYPE" '
+      [
+        .[] | 
+        select((.name | ascii_downcase) == ($issuetype | ascii_downcase)) |
+        {
+          issueType: .name,
+          issueTypeId: .id,
+          workflow: {
+            statuses: [
+              .statuses[] | 
+              {
+                name: .name,
+                id: .id,
+                statusCategory: .statusCategory.name
+              }
+            ]
+          }
+        }
+      ] | 
+      if length > 0 then .[0] else {error: "Issue type not found", availableTypes: [inputs[].name]} end
+    ')
+    
+    # Verificar si el tipo de issue existe
+    if echo "$RESPONSE" | jq -e 'has("error")' > /dev/null 2>&1; then
+      echo "Error: Tipo de issue '$PROJECT_WORKFLOW_ISSUETYPE' no encontrado en el proyecto" >&2
+      echo "$RESPONSE" | jq -r '.error' >&2
+      exit 1
+    fi
+  fi
+  IS_SINGLE_OBJECT=false
+fi
+
 # Formato de salida
 case "$OUTPUT" in
   json)
-    echo "$RESPONSE" | jq
+    # Formato especial para --workflow
+    if [[ -n "$PROJECT_WORKFLOW_ISSUETYPE" ]]; then
+      echo "$RESPONSE" | jq
+    else
+      echo "$RESPONSE" | jq
+    fi
     ;;
   csv)
+    # Formato específico para --workflow
+    if [[ -n "$PROJECT_WORKFLOW_ISSUETYPE" && "$PROJECT_WORKFLOW_ISSUETYPE" != "__ALL__" ]]; then
+      echo "Status ID,Status Name,Status Category"
+      echo "$RESPONSE" | jq -r '.workflow.statuses[] | [.id, .name, .statusCategory] | @csv'
+      exit 0
+    fi
+    
     # Formato específico para transiciones
     if echo "$RESPONSE" | jq -e 'has("transitions")' > /dev/null 2>&1; then
       echo "ID,Name,To Status,Status Category"
@@ -2046,6 +2190,17 @@ case "$OUTPUT" in
     fi
     ;;
   table)
+    # Formato específico para --workflow
+    if [[ -n "$PROJECT_WORKFLOW_ISSUETYPE" && "$PROJECT_WORKFLOW_ISSUETYPE" != "__ALL__" ]]; then
+      echo "Workflow para tipo de issue: $(echo "$RESPONSE" | jq -r '.issueType')"
+      echo ""
+      {
+        echo -e "ID\tStatus\tCategory";
+        echo "$RESPONSE" | jq -r '.workflow.statuses[] | [.id, .name, .statusCategory] | @tsv' ;
+      } | column -t -s $'\t'
+      exit 0
+    fi
+    
     # Formato específico para transiciones
     if echo "$RESPONSE" | jq -e 'has("transitions")' > /dev/null 2>&1; then
       {
@@ -2074,6 +2229,16 @@ case "$OUTPUT" in
     echo "$RESPONSE" | yq -P
     ;;
   md)
+    # Formato específico para --workflow
+    if [[ -n "$PROJECT_WORKFLOW_ISSUETYPE" && "$PROJECT_WORKFLOW_ISSUETYPE" != "__ALL__" ]]; then
+      echo "# Workflow para tipo de issue: $(echo "$RESPONSE" | jq -r '.issueType')"
+      echo ""
+      echo "| ID | Status | Category |"
+      echo "|---|---|---|"
+      echo "$RESPONSE" | jq -r '.workflow.statuses[] | "|" + (.id|tostring) + "|" + .name + "|" + .statusCategory + "|"'
+      exit 0
+    fi
+    
     # Formato específico para transiciones
     if echo "$RESPONSE" | jq -e 'has("transitions")' > /dev/null 2>&1; then
       echo "| ID | Name | To Status | Status Category |"

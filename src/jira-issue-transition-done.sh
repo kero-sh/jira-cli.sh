@@ -16,6 +16,7 @@ Descripción:
 
 Opciones:
   -h, --help         Muestra esta ayuda
+    --tickets LIST     Lista de issues separados por comas (ej: ANDES-1,ANDES-2)
 
 Ejemplos:
   $(basename "$0") ABC-123
@@ -23,17 +24,27 @@ EOF
     exit 0
 }
 
-# Check for help flag
+# Parse args: support --tickets and positional issue key
+TICKETS=""
 if [[ "$1" =~ ^(-h|--help)$ ]]; then
     usage
 fi
 
-if [[ -z "$1" ]]; then
-    error "Debes especificar un issue key"
-    usage
+if [[ "$1" =~ ^--tickets= ]]; then
+    TICKETS="${1#--tickets=}"
+    shift
+elif [[ "$1" == "--tickets" ]]; then
+    TICKETS="$2"
+    shift 2
 fi
 
-ISSUE_KEY="$1"
+if [[ -z "$TICKETS" ]]; then
+    if [[ -z "$1" ]]; then
+        error "Debes especificar un issue key o usar --tickets"
+        usage
+    fi
+    ISSUE_KEY="$1"
+fi
 
 # Función para encontrar el estado Done objetivo
 find_target_done_status() {
@@ -97,92 +108,134 @@ execute_transition_to_status() {
     return 1
 }
 
-# 1. Obtener información del issue
-info "Obteniendo información del issue $ISSUE_KEY..."
-issue_data=$($DIR/jira.sh issue "$ISSUE_KEY" 2>/dev/null)
-if [[ -z "$issue_data" ]]; then
-    error "No se pudo obtener información del issue $ISSUE_KEY"
-    exit 1
-fi
+# Process a single ticket: wrapper to reuse the same logic for multiple tickets
+process_issue() {
+    local ISSUE_KEY_LOCAL="$1"
 
-project_key=$(echo "$issue_data" | jq -r '.fields.project.key')
-issue_type=$(echo "$issue_data" | jq -r '.fields.issuetype.name')
-current_status=$(echo "$issue_data" | jq -r '.fields.status.name')
-current_category=$(echo "$issue_data" | jq -r '.fields.status.statusCategory.name')
+    # 1. Obtener información del issue
+    info "Obteniendo información del issue $ISSUE_KEY_LOCAL..."
+    local issue_data
+    issue_data=$($DIR/jira.sh issue "$ISSUE_KEY_LOCAL" 2>/dev/null)
+    if [[ -z "$issue_data" ]]; then
+        error "No se pudo obtener información del issue $ISSUE_KEY_LOCAL"
+        return 1
+    fi
 
-info "Proyecto: $project_key, Tipo: $issue_type, Estado actual: $current_status"
+    local project_key
+    local issue_type
+    local current_status
+    local current_category
+    project_key=$(echo "$issue_data" | jq -r '.fields.project.key')
+    issue_type=$(echo "$issue_data" | jq -r '.fields.issuetype.name')
+    current_status=$(echo "$issue_data" | jq -r '.fields.status.name')
+    current_category=$(echo "$issue_data" | jq -r '.fields.status.statusCategory.name')
 
-# 2. Verificar si ya está en estado Done
-if [[ "$current_category" == "Done" ]]; then
-    success "El issue ya está en estado Done: $current_status"
-    $DIR/jira-issue.sh "$ISSUE_KEY"
-    exit 0
-fi
+    info "Proyecto: $project_key, Tipo: $issue_type, Estado actual: $current_status"
 
-# 3. Obtener workflow del proyecto
-info "Obteniendo workflow del proyecto $project_key..."
-workflow_data=$($DIR/jira.sh project statuses "$project_key" 2>/dev/null)
-if [[ -z "$workflow_data" ]]; then
-    error "No se pudo obtener el workflow del proyecto $project_key"
-    exit 1
-fi
+    # 2. Verificar si ya está en estado Done
+    if [[ "$current_category" == "Done" ]]; then
+        success "El issue ya está en estado Done: $current_status"
+        $DIR/jira-issue.sh "$ISSUE_KEY_LOCAL"
+        return 0
+    fi
 
-issue_workflow=$(echo "$workflow_data" | jq --arg type "$issue_type" '.[] | select(.name == $type)')
-if [[ -z "$issue_workflow" ]]; then
-    error "No se encontró workflow para el tipo de issue: $issue_type"
-    exit 1
-fi
+    # 3. Obtener workflow del proyecto
+    info "Obteniendo workflow del proyecto $project_key..."
+    local workflow_data
+    workflow_data=$($DIR/jira.sh project statuses "$project_key" 2>/dev/null)
+    if [[ -z "$workflow_data" ]]; then
+        error "No se pudo obtener el workflow del proyecto $project_key"
+        return 1
+    fi
 
-# 4. Identificar estado objetivo (Done)
-info "Identificando estado final objetivo..."
-target_status=$(find_target_done_status "$issue_workflow")
-if [[ -z "$target_status" || "$target_status" == "null" ]]; then
-    error "No se encontró ningún estado Done en el workflow"
-    exit 1
-fi
+    local issue_workflow
+    issue_workflow=$(echo "$workflow_data" | jq --arg type "$issue_type" '.[] | select(.name == $type)')
+    if [[ -z "$issue_workflow" ]]; then
+        error "No se encontró workflow para el tipo de issue: $issue_type"
+        return 1
+    fi
 
-info "Estado objetivo: $target_status"
+    # 4. Identificar estado objetivo (Done)
+    info "Identificando estado final objetivo..."
+    target_status=$(find_target_done_status "$issue_workflow")
+    if [[ -z "$target_status" || "$target_status" == "null" ]]; then
+        error "No se encontró ningún estado Done en el workflow"
+        return 1
+    fi
 
-# 5. Calcular camino de estados
-info "Calculando camino de transiciones..."
-status_path=$(get_status_path "$issue_workflow" "$current_status" "$target_status")
+    info "Estado objetivo: $target_status"
 
-if [[ -z "$status_path" ]]; then
-    warn "No se encontró un camino directo desde $current_status hasta $target_status"
-    warn "Intentando transición directa..."
-    if execute_transition_to_status "$ISSUE_KEY" "$target_status"; then
-        success "Transición directa exitosa"
+    # 5. Calcular camino de estados
+    info "Calculando camino de transiciones..."
+    status_path=$(get_status_path "$issue_workflow" "$current_status" "$target_status")
+
+    if [[ -z "$status_path" ]]; then
+        warn "No se encontró un camino directo desde $current_status hasta $target_status"
+        warn "Intentando transición directa..."
+        if execute_transition_to_status "$ISSUE_KEY_LOCAL" "$target_status"; then
+            success "Transición directa exitosa"
+        else
+            error "No fue posible realizar la transición"
+            return 1
+        fi
     else
-        error "No fue posible realizar la transición"
+        # 6. Ejecutar transiciones iterativamente
+        echo "$status_path" | while read -r next_status; do
+            if [[ -n "$next_status" ]]; then
+                if ! execute_transition_to_status "$ISSUE_KEY_LOCAL" "$next_status"; then
+                    warn "No se pudo transicionar a $next_status, intentando continuar..."
+                else
+                    sleep 1  # Pequeña pausa entre transiciones
+                fi
+            fi
+        done
+    fi
+
+    # 7. Verificar resultado final
+    echo ""
+    info "Estado final del issue:"
+    $DIR/jira-issue.sh "$ISSUE_KEY_LOCAL"
+
+    # Verificar si llegamos al estado Done
+    final_data=$($DIR/jira.sh issue "$ISSUE_KEY_LOCAL" 2>/dev/null)
+    final_category=$(echo "$final_data" | jq -r '.fields.status.statusCategory.name')
+    final_status=$(echo "$final_data" | jq -r '.fields.status.name')
+
+    if [[ "$final_category" == "Done" ]]; then
+        success "Issue transicionado exitosamente a estado Done: $final_status"
+        return 0
+    else
+        warn "El issue no llegó a estado Done. Estado actual: $final_status ($final_category)"
+        return 1
+    fi
+}
+
+# If multiple tickets provided, process them sequentially
+if [[ -n "$TICKETS" ]]; then
+    IFS=',' read -ra arr <<< "$TICKETS"
+    overall_status=0
+    for t in "${arr[@]}"; do
+        # Trim whitespace
+        ticket=$(printf '%s' "$t" | sed -e 's/^ *//' -e 's/ *$//')
+        info "--- Procesando $ticket ---"
+        if ! process_issue "$ticket"; then
+            warn "Fallo al procesar $ticket"
+            overall_status=1
+        fi
+        echo ""
+    done
+    if [[ $overall_status -eq 0 ]]; then
+        success "Todas las transiciones se completaron (o ya estaban en Done)."
+        exit 0
+    else
+        warn "Algunas transiciones fallaron. Revisa el output arriba."
         exit 1
     fi
 else
-    # 6. Ejecutar transiciones iterativamente
-    echo "$status_path" | while read -r next_status; do
-        if [[ -n "$next_status" ]]; then
-            if ! execute_transition_to_status "$ISSUE_KEY" "$next_status"; then
-                warn "No se pudo transicionar a $next_status, intentando continuar..."
-            else
-                sleep 1  # Pequeña pausa entre transiciones
-            fi
-        fi
-    done
-fi
-
-# 7. Verificar resultado final
-echo ""
-info "Estado final del issue:"
-$DIR/jira-issue.sh "$ISSUE_KEY"
-
-# Verificar si llegamos al estado Done
-final_data=$($DIR/jira.sh issue "$ISSUE_KEY" 2>/dev/null)
-final_category=$(echo "$final_data" | jq -r '.fields.status.statusCategory.name')
-final_status=$(echo "$final_data" | jq -r '.fields.status.name')
-
-if [[ "$final_category" == "Done" ]]; then
-    success "Issue transicionado exitosamente a estado Done: $final_status"
-    exit 0
-else
-    warn "El issue no llegó a estado Done. Estado actual: $final_status ($final_category)"
-    exit 1
+    # Single issue mode
+    if process_issue "$ISSUE_KEY"; then
+        exit 0
+    else
+        exit 1
+    fi
 fi

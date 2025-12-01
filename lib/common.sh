@@ -13,10 +13,7 @@ if [[ -n "$HELPER_SCRIPT" ]]; then
   if [[ -f "$HELPER_SCRIPT" ]]; then
     # shellcheck source=/dev/null
     source "$HELPER_SCRIPT"
-    HELPER_FOUND=true
-  else
-    echo "[CRITICAL] HELPER_SCRIPT is set but file not found: $HELPER_SCRIPT" >&2
-    exit 1
+    HELPER_FOUND=true  
   fi
 fi
 
