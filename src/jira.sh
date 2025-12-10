@@ -15,6 +15,7 @@ source "$DIR/../lib/common.sh"
 # jira priority
 # jira status
 # jira user [username]
+# jira profile          - Obtiene información del perfil del usuario actual
 # jira api <endpoint> [--method METHOD] [--field key=value] [--raw-field key=value] [--data FILE|JSON] [--header KEY:VALUE]
 
 set -e
@@ -130,6 +131,7 @@ RECURSOS DISPONIBLES:
   user [username]    - Busca usuario(s)
   user get <term>    - Obtiene el perfil completo del usuario
   user search <term> - Busca usuarios por texto/email/username
+  profile            - Obtiene información del perfil del usuario actual
   api <endpoint>     - Realiza peticiones HTTP directas a la API de Jira
   issuetype          - Lista todos los tipos de issue
   field              - Lista todos los campos
@@ -390,6 +392,51 @@ Ejemplos:
   jira api /issue --method POST --field summary='New Issue' --field project='ABC'
   jira api /issue/ABC-123 --method PUT --field summary='Updated Title'
   jira api /search --raw-field jql='status=Open' --header 'Accept: application/json'
+EOF
+}
+
+# Help for 'jira profile'
+show_help_profile() {
+  cat << EOF
+Uso: jira profile [opciones]
+
+Descripción:
+  Obtiene información del perfil del usuario actual autenticado.
+  Utiliza el endpoint /myself de la API de Jira que devuelve los detalles
+  del usuario basado en el token de autenticación proporcionado.
+
+Opciones:
+  --output FORMAT    Formato de salida: json, csv, table, yaml, md
+  -h, --help         Muestra esta ayuda
+
+Información devuelta:
+  - accountId: ID único de la cuenta Atlassian
+  - displayName: Nombre visible del usuario
+  - emailAddress: Correo electrónico del usuario
+  - active: Estado de la cuenta (true/false)
+  - timeZone: Zona horaria configurada
+  - avatarUrls: URLs de los avatares en diferentes tamaños
+  - groups: Grupos a los que pertenece el usuario
+  - applicationRoles: Roles de aplicación asignados
+
+Ejemplos:
+  # Obtener perfil en formato JSON (por defecto)
+  jira profile
+  
+  # Obtener perfil en formato tabla
+  jira profile --output table
+  
+  # Obtener perfil en formato CSV
+  jira profile --output csv
+  
+  # Obtener perfil en formato Markdown
+  jira profile --output md
+
+Notas:
+  - Requiere autenticación válida (token o email+API token)
+  - La información devuelta está sujeta a la configuración de privacidad
+    del usuario en su cuenta Atlassian
+  - Funciona tanto con Jira Cloud (v3) como Jira Server/Data Center (v2)
 EOF
 }
 
@@ -971,9 +1018,13 @@ build_endpoint() {
         exit 1
       fi
       ;;
+    profile|myself)
+      # Obtener perfil del usuario actual
+      ENDPOINT="/myself"
+      ;;
     *)
       echo "Recurso no reconocido: $resource" >&2
-      echo "Recursos disponibles: project, issue, search, priority, status, workflow, user, api, issuetype, field, resolution, component, version" >&2
+      echo "Recursos disponibles: project, issue, search, priority, status, workflow, user, profile, api, issuetype, field, resolution, component, version" >&2
       exit 1
       ;;
   esac
@@ -1107,6 +1158,7 @@ if [[ $# -gt 0 ]] && [[ "$1" == "help" ]]; then
       priority)         show_help_priority; exit 0 ;;
       status)           show_help_status; exit 0 ;;
       workflow)         show_help_workflow; exit 0 ;;
+      profile|myself)   show_help_profile; exit 0 ;;
       api)              show_help_api; exit 0 ;;
       issuetype)        show_help_issuetype; exit 0 ;;
       *)                show_help; exit 0 ;;
@@ -1143,6 +1195,7 @@ if [[ $# -gt 0 ]] && [[ "$1" =~ ^(GET|POST|PUT)$ ]]; then
           priority)         show_help_priority; exit 0 ;;
           status)           show_help_status; exit 0 ;;
           workflow)         show_help_workflow; exit 0 ;;
+          profile|myself)   show_help_profile; exit 0 ;;
           api)              show_help_api; exit 0 ;;
           issuetype)        show_help_issuetype; exit 0 ;;
         esac
@@ -1238,6 +1291,7 @@ elif [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
       priority)         show_help_priority; exit 0 ;;
       status)           show_help_status; exit 0 ;;
       workflow)         show_help_workflow; exit 0 ;;
+      profile|myself)   show_help_profile; exit 0 ;;
       api)              show_help_api; exit 0 ;;
       issuetype)        show_help_issuetype; exit 0 ;;
     esac
@@ -1254,6 +1308,7 @@ elif [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
       priority)         show_help_priority; exit 0 ;;
       status)           show_help_status; exit 0 ;;
       workflow)         show_help_workflow; exit 0 ;;
+      profile|myself)   show_help_profile; exit 0 ;;
       api)              show_help_api; exit 0 ;;
       issuetype)        show_help_issuetype; exit 0 ;;
       *)                show_help; exit 0 ;;
