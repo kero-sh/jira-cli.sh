@@ -15,6 +15,7 @@ source "$DIR/../lib/common.sh"
 # jira priority
 # jira status
 # jira user [username]
+# jira api <endpoint> [--method METHOD] [--field key=value] [--raw-field key=value] [--data FILE|JSON] [--header KEY:VALUE]
 
 set -e
 
@@ -41,6 +42,12 @@ TRANSITION_TARGET_SET=false
 TRANSITION_SPEC=""
 CREATE_MODE=false
 PAGINATE=false
+API_MODE=false
+API_METHOD=""
+API_FIELDS=()
+API_RAW_FIELDS=()
+API_HEADERS=()
+API_INPUT=""
 # Flags para crear issues (se aplican si create/POST /issue)
 CREATE_PROJECT=""
 CREATE_SUMMARY=""
@@ -123,6 +130,7 @@ RECURSOS DISPONIBLES:
   user [username]    - Busca usuario(s)
   user get <term>    - Obtiene el perfil completo del usuario
   user search <term> - Busca usuarios por texto/email/username
+  api <endpoint>     - Realiza peticiones HTTP directas a la API de Jira
   issuetype          - Lista todos los tipos de issue
   field              - Lista todos los campos
   resolution         - Lista todas las resoluciones
@@ -143,6 +151,13 @@ OPCIONES:
   --shell SHELL      - Genera script de autocompletado: bash, zsh
   --dry-run          - Imprime el comando curl en lugar de ejecutarlo
   --help             - Muestra esta ayuda
+
+OPCIONES PARA 'api':
+  --method METHOD    - Método HTTP: GET, POST, PUT (por defecto: GET)
+  --field key=value  - Agrega parámetro con inferencia de tipo (cambia método a POST)
+  --raw-field key=value - Agrega parámetro como string
+  --header KEY:VALUE - Agrega header HTTP adicional
+  --input FILE|JSON  - Archivo o JSON para el body de la petición
 
 FLAGS PARA CREATE (se combinan con --data si se provee):
   --project KEY      - Clave de proyecto (ej: ABC)
@@ -371,6 +386,65 @@ Ejemplos:
   jira create --data '{"fields":{"project":{"key":"ABC"},"summary":"Test","issuetype":{"name":"Task"}}}'
   jira create --data ./payload.json
   jira create --project ABC --summary "Title" --type Task
+  jira api /search?jql=project=ABC
+  jira api /issue --method POST --field summary='New Issue' --field project='ABC'
+  jira api /issue/ABC-123 --method PUT --field summary='Updated Title'
+  jira api /search --raw-field jql='status=Open' --header 'Accept: application/json'
+EOF
+}
+
+# Help for 'jira api'
+show_help_api() {
+  cat << EOF
+Uso: jira api <endpoint> [opciones]
+
+Descripción:
+  Realiza peticiones HTTP directas a la API de Jira, similar a glab api.
+  Soporta métodos GET, POST, PUT y construcción automática de payload.
+
+Opciones:
+  --method METHOD    Método HTTP: GET, POST, PUT (por defecto: GET, cambia a POST si hay campos)
+  --field key=value  Agrega parámetro con inferencia de tipo (true/false/null/number/@file)
+  --raw-field key=value - Agrega parámetro como string (sin inferencia de tipo)
+  --header KEY:VALUE - Agrega header HTTP adicional
+  --input FILE|JSON  Archivo o JSON para el body de la petición (usa - para stdin)
+  --output FORMAT    Formato de salida: json, csv, table, yaml, md
+  -h, --help         Muestra esta ayuda
+
+Inferencia de tipos para --field:
+  true, false, null -> Se convierten a tipos JSON correspondientes
+  números (123)      -> Se convierten a números JSON
+  @archivo           -> Lee el contenido del archivo
+  @-                 -> Lee desde stdin
+  otro texto         -> Se mantiene como string
+
+Ejemplos:
+  # Búsqueda simple (GET por defecto)
+  jira api /search?jql=project=ABC
+  
+  # Crear issue con campos (POST automático por --field)
+  jira api /issue --field summary='New Issue' --field project='ABC' --field issuetype='Task'
+  
+  # Actualizar issue con método explícito
+  jira api /issue/ABC-123 --method PUT --field summary='Updated Title'
+  
+  # Usar archivo como payload
+  jira api /issue --method POST --input payload.json
+  
+  # Leer payload desde stdin
+  echo '{"fields":{"summary":"From stdin"}}' | jira api /issue --input -
+  
+  # Agregar headers personalizados
+  jira api /search --header 'Accept: application/json' --header 'X-Custom: value'
+  
+  # Campos con tipos especiales
+  jira api /issue --field priority='High' --field customfield_10100='EPIC-123' --field flag=true
+
+Notas:
+  - El endpoint debe comenzar con / o ser una URL completa
+  - Si especificas --field o --raw-field, el método cambia automáticamente a POST
+  - Puedes combinar --field (con inferencia) y --raw-field (siempre string)
+  - Los headers adicionales se agregan a los headers de autenticación por defecto
 EOF
 }
 
@@ -886,9 +960,20 @@ build_endpoint() {
         exit 1
       fi
       ;;
+    api)
+      # Modo API directo - el endpoint es el identificador
+      API_MODE=true
+      if [[ -n "$identifier" ]]; then
+        ENDPOINT="$identifier"
+      else
+        echo "Error: 'jira api' requiere un endpoint" >&2
+        echo "Ejemplo: jira api /search?jql=project=ABC" >&2
+        exit 1
+      fi
+      ;;
     *)
       echo "Recurso no reconocido: $resource" >&2
-      echo "Recursos disponibles: project, issue, search, priority, status, workflow, user, issuetype, field, resolution, component, version" >&2
+      echo "Recursos disponibles: project, issue, search, priority, status, workflow, user, api, issuetype, field, resolution, component, version" >&2
       exit 1
       ;;
   esac
@@ -986,6 +1071,17 @@ for ((i=0; i<${#temp_args[@]}; i++)); do
       DRY_RUN=true ;;
     --paginate)
       PAGINATE=true ;;
+    # Opciones para 'api'
+    --method)
+      API_METHOD="${temp_args[i+1]}"; ((i++)) ;;
+    --field|-f)
+      API_FIELDS+=("${temp_args[i+1]}"); ((i++)) ;;
+    --raw-field|-F)
+      API_RAW_FIELDS+=("${temp_args[i+1]}"); ((i++)) ;;
+    --header|-H)
+      API_HEADERS+=("${temp_args[i+1]}"); ((i++)) ;;
+    --input)
+      API_INPUT="${temp_args[i+1]}"; ((i++)) ;;
     -h|--help)
       # Don't show help immediately, let resource-specific help handle it
       SHOW_HELP_FLAG=true ;;
@@ -1011,6 +1107,7 @@ if [[ $# -gt 0 ]] && [[ "$1" == "help" ]]; then
       priority)         show_help_priority; exit 0 ;;
       status)           show_help_status; exit 0 ;;
       workflow)         show_help_workflow; exit 0 ;;
+      api)              show_help_api; exit 0 ;;
       issuetype)        show_help_issuetype; exit 0 ;;
       *)                show_help; exit 0 ;;
     esac
@@ -1046,6 +1143,7 @@ if [[ $# -gt 0 ]] && [[ "$1" =~ ^(GET|POST|PUT)$ ]]; then
           priority)         show_help_priority; exit 0 ;;
           status)           show_help_status; exit 0 ;;
           workflow)         show_help_workflow; exit 0 ;;
+          api)              show_help_api; exit 0 ;;
           issuetype)        show_help_issuetype; exit 0 ;;
         esac
       fi
@@ -1140,6 +1238,7 @@ elif [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
       priority)         show_help_priority; exit 0 ;;
       status)           show_help_status; exit 0 ;;
       workflow)         show_help_workflow; exit 0 ;;
+      api)              show_help_api; exit 0 ;;
       issuetype)        show_help_issuetype; exit 0 ;;
     esac
   fi
@@ -1155,6 +1254,7 @@ elif [[ $# -gt 0 ]] && [[ ! "$1" =~ ^- ]]; then
       priority)         show_help_priority; exit 0 ;;
       status)           show_help_status; exit 0 ;;
       workflow)         show_help_workflow; exit 0 ;;
+      api)              show_help_api; exit 0 ;;
       issuetype)        show_help_issuetype; exit 0 ;;
       *)                show_help; exit 0 ;;
     esac
@@ -1247,9 +1347,9 @@ while [[ $# -gt 0 ]]; do
       # Flag sin valor, ya procesado en el primer pase
       shift
       ;;
-    --data|--token|--host|--output|--csv-export|--transitions|--to|--transition|--project|--summary|--description|--type|--assignee|--reporter|--priority|--epic|--link-issue|--template|--workflow|--from-date|--to-date|--lookback|--limit|-m|--message)
+    --data|--token|--host|--output|--csv-export|--transitions|--to|--transition|--project|--summary|--description|--type|--assignee|--reporter|--priority|--epic|--link-issue|--template|--workflow|--from-date|--to-date|--lookback|--limit|-m|--message|--method|--field|--raw-field|--header|--input|-f|-F|-H)
       # Ya procesados en el primer pase, saltarlos
-      if [[ "$1" =~ ^--(data|token|host|output|csv-export|to|transition|project|summary|description|type|assignee|reporter|priority|epic|link-issue|template|workflow|from-date|to-date|lookback|limit|message)$ ]] || [[ "$1" == "-m" ]]; then
+      if [[ "$1" =~ ^--(data|token|host|output|csv-export|to|transition|project|summary|description|type|assignee|reporter|priority|epic|link-issue|template|workflow|from-date|to-date|lookback|limit|message|method|field|raw-field|header|input)$ ]] || [[ "$1" =~ ^-[mfFH]$ ]]; then
         shift 2
       else
         shift
@@ -1747,6 +1847,85 @@ if [[ "$MULTI_STEP_USER_ACTIVITY" == "true" ]]; then
   fi
 fi
 
+prepare_api_payload() {
+  # Si hay --input, usarlo directamente
+  if [[ -n "$API_INPUT" ]]; then
+    if [[ "$API_INPUT" == "-" ]]; then
+      # Leer desde stdin
+      if [[ -t 0 ]]; then
+        echo "Error: No hay datos en stdin. Usa un pipe o redirección." >&2
+        exit 1
+      fi
+      cat
+    elif [[ -f "$API_INPUT" ]]; then
+      cat "$API_INPUT"
+    else
+      # Es JSON inline
+      printf '%s' "$API_INPUT"
+    fi
+    return
+  fi
+  
+  # Construir payload desde --field y --raw-field
+  local payload_file
+  payload_file=$(mktemp)
+  printf '{}' > "$payload_file"
+  
+  # Procesar --raw-field (valores como string)
+  for field in "${API_RAW_FIELDS[@]}"; do
+    if [[ "$field" =~ ^([^=]+)=(.*)$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      value="${BASH_REMATCH[2]}"
+      jq --arg key "$key" --arg value "$value" '. + {($key): $value}' "$payload_file" > "${payload_file}.tmp" && mv "${payload_file}.tmp" "$payload_file"
+    fi
+  done
+  
+  # Procesar --field (con inferencia de tipo)
+  for field in "${API_FIELDS[@]}"; do
+    if [[ "$field" =~ ^([^=]+)=(.*)$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      value="${BASH_REMATCH[2]}"
+      
+      # Inferencia de tipo como glab
+      if [[ "$value" == "true" ]]; then
+        jq --arg key "$key" '. + {($key): true}' "$payload_file" > "${payload_file}.tmp" && mv "${payload_file}.tmp" "$payload_file"
+      elif [[ "$value" == "false" ]]; then
+        jq --arg key "$key" '. + {($key): false}' "$payload_file" > "${payload_file}.tmp" && mv "${payload_file}.tmp" "$payload_file"
+      elif [[ "$value" == "null" ]]; then
+        jq --arg key "$key" '. + {($key): null}' "$payload_file" > "${payload_file}.tmp" && mv "${payload_file}.tmp" "$payload_file"
+      elif [[ "$value" =~ ^-?[0-9]+$ ]]; then
+        jq --arg key "$key" --argjson value "$value" '. + {($key): $value}' "$payload_file" > "${payload_file}.tmp" && mv "${payload_file}.tmp" "$payload_file"
+      elif [[ "$value" =~ ^@ ]]; then
+        # Leer desde archivo
+        local file_value="${value#@}"
+        if [[ "$file_value" == "-" ]]; then
+          # Leer desde stdin
+          if [[ -t 0 ]]; then
+            echo "Error: No hay datos en stdin para @$key" >&2
+            exit 1
+          fi
+          local content
+          content=$(cat)
+          jq --arg key "$key" --arg value "$content" '. + {($key): $value}' "$payload_file" > "${payload_file}.tmp" && mv "${payload_file}.tmp" "$payload_file"
+        elif [[ -f "$file_value" ]]; then
+          local content
+          content=$(cat "$file_value")
+          jq --arg key "$key" --arg value "$content" '. + {($key): $value}' "$payload_file" > "${payload_file}.tmp" && mv "${payload_file}.tmp" "$payload_file"
+        else
+          echo "Error: Archivo no encontrado: $file_value" >&2
+          exit 1
+        fi
+      else
+        # String por defecto
+        jq --arg key "$key" --arg value "$value" '. + {($key): $value}' "$payload_file" > "${payload_file}.tmp" && mv "${payload_file}.tmp" "$payload_file"
+      fi
+    fi
+  done
+  
+  cat "$payload_file"
+  rm -f "$payload_file"
+}
+
 prepare_create_payload() {
   local base_file
   base_file=$(mktemp)
@@ -1838,7 +2017,29 @@ else
     curl_args+=(-H "$AUTH_HEADER")
   fi
   
-  if [[ "$CREATE_MODE" == "true" || ( "$METHOD" == "POST" && "$ENDPOINT" == "/issue" ) ]]; then
+  # Agregar headers adicionales del modo API
+  for header in "${API_HEADERS[@]}"; do
+    curl_args+=(-H "$header")
+  done
+  
+  if [[ "$API_MODE" == "true" ]]; then
+    # Manejo especial para modo API
+    # Determinar método (si se especificó --method o si hay campos/data)
+    if [[ -n "$API_METHOD" ]]; then
+      curl_args[1]="$API_METHOD"
+    elif [[ ${#API_FIELDS[@]} -gt 0 || ${#API_RAW_FIELDS[@]} -gt 0 || -n "$API_INPUT" ]]; then
+      # Si hay campos o input, cambiar a POST (como glab)
+      curl_args[1]="POST"
+    fi
+    
+    # Construir payload para API
+    if [[ ${#API_FIELDS[@]} -gt 0 || ${#API_RAW_FIELDS[@]} -gt 0 || -n "$API_INPUT" ]]; then
+      api_payload_file=$(mktemp)
+      prepare_api_payload > "$api_payload_file"
+      curl_args+=(--data "@$api_payload_file")
+      trap "rm -f '$api_payload_file'" EXIT
+    fi
+  elif [[ "$CREATE_MODE" == "true" || ( "$METHOD" == "POST" && "$ENDPOINT" == "/issue" ) ]]; then
     FINAL_DATA_FILE=$(prepare_create_payload)
     curl_args+=(--data @"$FINAL_DATA_FILE")
   elif [[ "$ISSUE_SUBCOMMAND" == "comment" && "$METHOD" == "POST" ]]; then
