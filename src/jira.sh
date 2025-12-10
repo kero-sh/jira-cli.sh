@@ -37,6 +37,7 @@ ENDPOINT=""
 DATA=""
 OUTPUT="json"
 CSV_EXPORT_MODE="all" # all|current para exportador oficial de Jira Cloud (solo /search)
+COMMENT_SCAN_MAX="" # Límite de comentarios a escanear (usa $JIRA_ACTIVITY_COMMENT_SCAN_MAX por defecto)
 SHOW_TRANSITIONS=false
 TRANSITION_TARGET=""
 TRANSITION_TARGET_SET=false
@@ -157,14 +158,13 @@ OPCIONES:
 PARA OPCIÓN ESPECÍFICAS DE CADA SUBCOMANDO: usa 'jira <subcomando> --help'
 
 VARIABLES DE ENTORNO:
-  JIRA_HOST          - URL base de Jira (ej: https://jira.ejemplo.com)
-  JIRA_TOKEN         - Token OAuth Bearer (si usas OAuth/3LO)
-  JIRA_EMAIL         - Email de tu cuenta (para Jira Cloud API token)
-  JIRA_API_TOKEN     - API token de Atlassian (para Basic)
-  JIRA_API_VERSION   - 3 (Cloud, por defecto) o 2 (Server/DC)
-  JIRA_AUTH          - basic|bearer (opcional; si no, autodetecta)
-  JIRA_PROJECT       - Clave de proyecto por defecto para 'create'
-  JIRA_ACTIVITY_COMMENT_SCAN_MAX - Límite de comentarios a escanear (default: 100)
+  --jira-host HOST    - URL base de Jira (default: $JIRA_HOST)
+  --jira-token TOKEN - Token OAuth Bearer (default: $JIRA_TOKEN)
+  --jira-email EMAIL - Email de tu cuenta (default: $JIRA_EMAIL)
+  --jira-api-token TOKEN - API token de Atlassian para Basic (default: $JIRA_API_TOKEN)
+  --jira-api-version NUM - Versión API: 3 (Cloud) o 2 (Server/DC) (default: $JIRA_API_VERSION)
+  --jira-auth TYPE   - Tipo autenticación: basic|bearer (default: $JIRA_AUTH o autodetecta)
+  --jira-project KEY - Clave de proyecto por defecto para 'create' (default: $JIRA_PROJECT)
 
 FORMATOS DE SALIDA:
   json               - JSON formateado (por defecto)
@@ -307,6 +307,7 @@ Opciones:
   --to ID            ID de transición a aplicar (requiere --transitions)
   --transition SPEC  Aplica transición por ID, nombre de transición o nombre de estado destino
   -m, --message      Mensaje del comentario (requerido para comment)
+  --comment-scan-max NUM - Límite de comentarios a escanear (default: $JIRA_ACTIVITY_COMMENT_SCAN_MAX o 100)
   --output FORMAT    Formato de salida: json, csv, table, yaml, md
   -h, --help         Muestra esta ayuda
 
@@ -1047,6 +1048,38 @@ for ((i=0; i<${#temp_args[@]}; i++)); do
       JIRA_HOST="${temp_args[i+1]}"
       ((i++))
       ;;
+    --jira-host)
+      JIRA_HOST="${temp_args[i+1]}"
+      ((i++))
+      ;;
+    --jira-token)
+      JIRA_TOKEN="${temp_args[i+1]}"
+      ((i++))
+      ;;
+    --jira-email)
+      JIRA_EMAIL="${temp_args[i+1]}"
+      ((i++))
+      ;;
+    --jira-api-token)
+      JIRA_API_TOKEN="${temp_args[i+1]}"
+      ((i++))
+      ;;
+    --jira-api-version)
+      JIRA_API_VERSION="${temp_args[i+1]}"
+      ((i++))
+      ;;
+    --jira-auth)
+      JIRA_AUTH="${temp_args[i+1]}"
+      ((i++))
+      ;;
+    --jira-project)
+      JIRA_PROJECT="${temp_args[i+1]}"
+      ((i++))
+      ;;
+    --comment-scan-max)
+      COMMENT_SCAN_MAX="${temp_args[i+1]}"
+      ((i++))
+      ;;
     --data)
       DATA="${temp_args[i+1]}"
       ((i++))
@@ -1385,9 +1418,9 @@ while [[ $# -gt 0 ]]; do
       # Flag sin valor, ya procesado en el primer pase
       shift
       ;;
-    --data|--token|--host|--output|--csv-export|--transitions|--to|--transition|--project|--summary|--description|--type|--assignee|--reporter|--priority|--epic|--link-issue|--template|--workflow|--from-date|--to-date|--lookback|--limit|-m|--message|--method|--field|--raw-field|--header|--input|-f|-F|-H)
+    --data|--token|--host|--output|--csv-export|--transitions|--to|--transition|--project|--summary|--description|--type|--assignee|--reporter|--priority|--epic|--link-issue|--template|--workflow|--from-date|--to-date|--lookback|--limit|--jira-host|--jira-token|--jira-email|--jira-api-token|--jira-api-version|--jira-auth|--jira-project|--comment-scan-max|-m|--message|--method|--field|--raw-field|--header|--input|-f|-F|-H)
       # Ya procesados en el primer pase, saltarlos
-      if [[ "$1" =~ ^--(data|token|host|output|csv-export|to|transition|project|summary|description|type|assignee|reporter|priority|epic|link-issue|template|workflow|from-date|to-date|lookback|limit|message|method|field|raw-field|header|input)$ ]] || [[ "$1" =~ ^-[mfFH]$ ]]; then
+      if [[ "$1" =~ ^--(data|token|host|output|csv-export|to|transition|project|summary|description|type|assignee|reporter|priority|epic|link-issue|template|workflow|from-date|to-date|lookback|limit|jira-host|jira-token|jira-email|jira-api-token|jira-api-version|jira-auth|jira-project|comment-scan-max|message|method|field|raw-field|header|input)$ ]] || [[ "$1" =~ ^-[mfFH]$ ]]; then
         shift 2
       else
         shift
@@ -1403,6 +1436,10 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       ENDPOINT="$1"
+      shift
+      ;;
+    project|issue|search|create|priority|status|workflow|user|profile|myself|api|issuetype|field|resolution|component|version)
+      # Recursos válidos, ya procesados en la sección de sintaxis simplificada
       shift
       ;;
     *)
@@ -1847,7 +1884,7 @@ if [[ "$MULTI_STEP_USER_ACTIVITY" == "true" ]]; then
         _tot_not_started=$(get_total_by_jql "$JQL_TODO")
 
         # Comentados: escanear issues recientes
-        SCAN_MAX="${JIRA_ACTIVITY_COMMENT_SCAN_MAX:-100}"; PAGE=50
+        SCAN_MAX="${COMMENT_SCAN_MAX:-${JIRA_ACTIVITY_COMMENT_SCAN_MAX:-100}}"; PAGE=50
         _jql_recent="$date_filter_updated ORDER BY updated DESC"; _processed=0; _commented=0; _startAt=0
         while [[ $_processed -lt $SCAN_MAX ]]; do
           _enc=$(jq -rn --arg s "$_jql_recent" '$s|@uri')
