@@ -154,34 +154,7 @@ OPCIONES:
   --dry-run          - Imprime el comando curl en lugar de ejecutarlo
   --help             - Muestra esta ayuda
 
-OPCIONES PARA CREATE:
-  --project KEY      - Clave de proyecto (ej: ABC)
-  --summary TEXT     - Resumen/título del issue
-  --description TXT  - Descripción del issue
-  --type NAME        - Tipo de issue (ej: Task, Bug)
-  --assignee NAME    - Usuario asignado (username)
-  --reporter NAME    - Usuario reportero (username)
-  --priority NAME    - Prioridad del issue
-  --epic NAME        - Nombre del epic (para customfield_10100)
-  --link-issue KEY   - Issue a linkear
-  --template NAME    - Template a usar
-
-OPCIONES PARA USER ACTIVITY:
-  --from-date DATE   - Fecha de inicio (formato YYYY-MM-DD)
-  --to-date DATE     - Fecha de fin (formato YYYY-MM-DD)
-  --lookback DAYS    - Días hacia atrás desde hoy
-  --jql              - Solo mostrar JQL generado
-  --states           - Mostrar cambios de estado
-  --list             - Listar issues encontrados
-  --list-only        - Solo listar issues sin detalles
-  --limit NUM        - Límite de issues a procesar
-
-OPCIONES PARA 'api':
-  --method METHOD    - Método HTTP: GET, POST, PUT (por defecto: GET)
-  --field key=value  - Agrega parámetro con inferencia de tipo (cambia método a POST)
-  --raw-field key=value - Agrega parámetro como string
-  --header KEY:VALUE - Agrega header HTTP adicional
-  --input FILE|JSON  - Archivo o JSON para el body de la petición
+PARA OPCIÓN ESPECÍFICAS DE CADA SUBCOMANDO: usa 'jira <subcomando> --help'
 
 VARIABLES DE ENTORNO:
   JIRA_HOST          - URL base de Jira (ej: https://jira.ejemplo.com)
