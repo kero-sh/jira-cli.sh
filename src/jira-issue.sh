@@ -6,6 +6,8 @@ DIR="$( cd "$( dirname $(realpath ${BASH_SOURCE[0]} ))" && pwd )";
 source "$DIR/../lib/common.sh"
 
 JIRA_FIELDS='{"key": .key,"summary": .fields.summary,"description": .fields.description,"status": .fields.status.name}'
+RESUME_MODE=false
+FORMAT_OUTPUT="friendly"
 
 function usage() {
     cat <<EOF
@@ -19,12 +21,16 @@ Opciones:
   --fields <jsonpath>     Especifica los campos a mostrar en formato JSON
   --jsonpath=<jsonpath>   Alias para --fields
   --full                  Muestra todos los campos disponibles
+  --resume               Muestra un resumen del issue con campos clave
+  --format <format>       Formato de salida para --resume (friendly|json)
   -h, --help              Muestra esta ayuda
 
 Ejemplos:
   $(basename "$0") ABC-123
   $(basename "$0") --ticket ABC-123 --fields '.key, .summary'
   $(basename "$0") ABC-123 --full
+  $(basename "$0") ABC-123 --resume
+  $(basename "$0") ABC-123 --resume --format json
 EOF
     exit 0
 }
@@ -49,6 +55,18 @@ while [[ $# -gt 0 ]]; do
             ;;
         --full)
             JIRA_FIELDS=''
+            shift
+            ;;
+        --resume)
+            RESUME_MODE=true
+            shift
+            ;;
+        --format)
+            FORMAT_OUTPUT="$2"
+            shift 2
+            ;;
+        --format=*)
+            FORMAT_OUTPUT="${1#*=}"
             shift
             ;;
 
@@ -86,6 +104,44 @@ temp=$(mktemp)
 
 $DIR/jira.sh issue ${ISSUE_KEY} > $temp
 
-#cat $temp
+# Handle resume mode
+if [[ "$RESUME_MODE" == "true" ]]; then
+    # Validate format option
+    if [[ "$FORMAT_OUTPUT" != "friendly" && "$FORMAT_OUTPUT" != "json" ]]; then
+        echo "Error: Formato no válido. Use 'friendly' o 'json'."
+        exit 1
+    fi
+    
+    # Extract the required fields using jq
+    resume_data=$(jq -r '
+    {
+        titulo: .fields.summary // "N/A",
+        desc: .fields.description // "N/A",
+        reporter: .fields.reporter.displayName // "N/A",
+        asignee: (.fields.assignee.displayName // "No asignado"),
+        "fecha-creacion": .fields.created // "N/A",
+        comentarios: (.fields.comment.comments | length // 0)
+    }
+    ' < "$temp")
+    
+    if [[ "$FORMAT_OUTPUT" == "json" ]]; then
+        # Output JSON format
+        echo "$resume_data" | jq .
+    else
+        # Output friendly format
+        echo "=== Resumen del Issue ==="
+        echo "Título: $(echo "$resume_data" | jq -r '.titulo')"
+        echo "Descripción: $(echo "$resume_data" | jq -r '.desc' | head -c 100)$(if [ $(echo "$resume_data" | jq -r '.desc' | wc -c) -gt 100 ]; then echo "..."; fi)"
+        echo "Reporter: $(echo "$resume_data" | jq -r '.reporter')"
+        echo "Asignado a: $(echo "$resume_data" | jq -r '.asignee')"
+        echo "Fecha de creación: $(echo "$resume_data" | jq -r '.\"fecha-creacion\"')"
+        echo "Comentarios: $(echo "$resume_data" | jq -r '.comentarios')"
+        echo "========================"
+    fi
+else
+    # Original behavior for non-resume mode
+    [ -n "$JIRA_FIELDS" ] && jq -r "$JIRA_FIELDS" < $temp || jq < $temp
+fi
 
-[ -n "$JIRA_FIELDS" ] && jq -r "$JIRA_FIELDS" < $temp || jq < $temp
+# Cleanup
+rm -f "$temp"
