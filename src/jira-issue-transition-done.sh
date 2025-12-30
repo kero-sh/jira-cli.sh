@@ -5,6 +5,9 @@ DIR="$( cd "$( dirname $(realpath ${BASH_SOURCE[0]} ))" && pwd )";
 # shellcheck source=/dev/null
 source "$DIR/../lib/common.sh"
 
+COMMENT_MESSAGE=""
+DISCARD_MODE=false
+
 usage() {
     cat <<EOF
 Uso: $(basename "$0") <issue_key> [options]
@@ -17,6 +20,8 @@ Descripción:
 Opciones:
   -h, --help         Muestra esta ayuda
     --tickets LIST     Lista de issues separados por comas (ej: ANDES-1,ANDES-2)
+  -m, --message "txt"  Agrega comentario al finalizar (si queda en Done)
+  --discard           Descarta el ticket en lugar de llevarlo a Done
 
 Ejemplos:
   $(basename "$0") ABC-123
@@ -24,65 +29,121 @@ EOF
     exit 0
 }
 
-# Parse args: support --tickets and positional issue key
+# Parse args: support --tickets, -m and positional issue key
 TICKETS=""
-if [[ "$1" =~ ^(-h|--help)$ ]]; then
+ISSUE_KEY=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -h|--help)
+            usage
+            ;;
+        --tickets=*)
+            TICKETS="${1#*=}"
+            shift
+            ;;
+        --tickets)
+            TICKETS="$2"
+            shift 2
+            ;;
+        -m|--message)
+            COMMENT_MESSAGE="$2"
+            shift 2
+            ;;
+        --discard)
+            DISCARD_MODE=true
+            shift
+            ;;
+        *)
+            if [[ -z "$ISSUE_KEY" ]]; then
+                ISSUE_KEY="$1"
+                shift
+            else
+                error "Argumento desconocido: $1"
+                usage
+            fi
+            ;;
+    esac
+done
+
+if [[ -z "$TICKETS" && -z "$ISSUE_KEY" ]]; then
+    error "Debes especificar un issue key o usar --tickets"
     usage
 fi
 
-if [[ "$1" =~ ^--tickets= ]]; then
-    TICKETS="${1#--tickets=}"
-    shift
-elif [[ "$1" == "--tickets" ]]; then
-    TICKETS="$2"
-    shift 2
-fi
+# Regex de descarte de estados no ejecutables
+DISCARD_REGEX='(?i)(discard|descart|cancel|rechaz|reject|wont[[:space:]]*fix|won'\''t[[:space:]]*fix|invalid|duplicate|obsolete|not[[:space:]]*do|no[[:space:]]se[[:space:]]hara|no[[:space:]]se[[:space:]]har[aá])'
 
-if [[ -z "$TICKETS" ]]; then
-    if [[ -z "$1" ]]; then
-        error "Debes especificar un issue key o usar --tickets"
-        usage
-    fi
-    ISSUE_KEY="$1"
-fi
+# Deducción del siguiente paso usando solo las transiciones disponibles del issue
+# Regla:
+#   1) Si hay transiciones a categoría Done que no matcheen descarte, tomar la primera.
+#   2) Si no hay Done, revisar transiciones In Progress / Indeterminate sin descarte.
+#      - Si hay exactamente una, usarla.
+#      - Si hay 0 o más de una, no forzar y retornar vacío.
+select_next_transition() {
+    local transitions_json="$1"
 
-# Función para encontrar el estado Done objetivo
-find_target_done_status() {
-    local workflow="$1"
-    local keywords=("done" "closed" "completado" "finalizado" "cerrado" "terminado")
-    
-    # Buscar por keywords en orden de prioridad
-    for keyword in "${keywords[@]}"; do
-        local found=$(echo "$workflow" | jq -r --arg kw "$keyword" \
-            '.statuses[] | select(.statusCategory.key == "done" and (.name | ascii_downcase | contains($kw))) | .name' | head -1)
-        [[ -n "$found" && "$found" != "null" ]] && echo "$found" && return 0
-    done
-    
-    # Fallback: primer estado Done encontrado
-    local fallback=$(echo "$workflow" | jq -r '.statuses[] | select(.statusCategory.key == "done") | .name' | head -1)
-    [[ -n "$fallback" && "$fallback" != "null" ]] && echo "$fallback" && return 0
-    
+    # Intento Done permitido
+    local done_pick
+    done_pick=$(echo "$transitions_json" | jq -r --arg re "$DISCARD_REGEX" '
+        (.transitions // [])
+        | map(select(
+            (.to.statusCategory.key // "" | ascii_downcase) == "done"
+            and ((.name // "" | test($re;"i")) | not)
+            and ((.to.name // "" | test($re;"i")) | not)
+        ))
+        | (.[0] // empty)
+        | if . == null then "" else "\(.id)|\(.to.name)|done" end
+    ')
+    [[ -n "$done_pick" ]] && { echo "$done_pick"; return 0; }
+
+    # Intento In Progress / Indeterminate (o cualquier otra no descartada si no hay mejor opción)
+    local inprog_pick
+    inprog_pick=$(echo "$transitions_json" | jq -r --arg re "$DISCARD_REGEX" '
+        (.transitions // [])
+        | map(select(
+            ((.to.statusCategory.key // "" | ascii_downcase) | test("inprogress|indeterminate";"i"))
+            and ((.name // "" | test($re;"i")) | not)
+            and ((.to.name // "" | test($re;"i")) | not)
+        ))
+        | if length >= 1 then "\(.[] .id)|\(.[] .to.name)|\(.[] .to.statusCategory.key)" else "" end
+    ')
+    [[ -n "$inprog_pick" ]] && { echo "$inprog_pick"; return 0; }
+
+    # Intento 3: cualquier transición no descartada (ej. categoría To Do) si es la única opción
+    local any_pick
+    any_pick=$(echo "$transitions_json" | jq -r --arg re "$DISCARD_REGEX" '
+        (.transitions // [])
+        | map(select(
+            ((.name // "" | test($re;"i")) | not)
+            and ((.to.name // "" | test($re;"i")) | not)
+        )) as $clean
+        | if ($clean | length) == 0 then "" 
+          elif ($clean | length) == 1 then ($clean[0] | "\(.id)|\(.to.name)|\(.to.statusCategory.key)")
+          else (
+              ($clean
+               | map(select((.to.statusCategory.key // "" | ascii_downcase) | test("inprogress|indeterminate";"i")))
+               | .[0]?) as $pref
+              | if $pref != null then "\($pref.id)|\($pref.to.name)|\($pref.to.statusCategory.key)"
+                else ($clean[0] | "\(.id)|\(.to.name)|\(.to.statusCategory.key)")
+                end
+            )
+          end
+    ')
+    [[ -n "$any_pick" ]] && { echo "$any_pick"; return 0; }
+
+    # Nada aplicable
     return 1
 }
 
-# Función para obtener el camino de estados desde el actual hasta el objetivo
-get_status_path() {
-    local workflow="$1"
-    local current="$2"
-    local target="$3"
-    
-    echo "$workflow" | jq -r --arg curr "$current" --arg tgt "$target" '
-        .statuses | map(.name) as $names |
-        ($names | index($curr)) as $curr_idx |
-        ($names | index($tgt)) as $tgt_idx |
-        if $curr_idx == null or $tgt_idx == null then
-            []
-        elif $curr_idx >= $tgt_idx then
-            []
-        else
-            $names[($curr_idx + 1):($tgt_idx + 1)]
-        end | .[]
-    '
+# Agrega comentario final si se solicitó
+add_comment_if_requested() {
+    local issue="$1"
+    if [[ -n "$COMMENT_MESSAGE" ]]; then
+        info "Agregando comentario final..."
+        if ! printf '%s' "$COMMENT_MESSAGE" | $DIR/jira.sh issue comment "$issue" -m - >/dev/null 2>&1; then
+            warn "No se pudo agregar el comentario al issue $issue"
+        fi
+    fi
 }
 
 # Función para ejecutar transición a un estado específico
@@ -132,64 +193,89 @@ process_issue() {
 
     info "Proyecto: $project_key, Tipo: $issue_type, Estado actual: $current_status"
 
-    # 2. Verificar si ya está en estado Done
+    # 2. Verificar si ya está en estado Done o si se pidió descartar
+    if [[ "$DISCARD_MODE" == "true" ]]; then
+        if [[ "$current_category" == "Done" ]]; then
+            success "El issue ya está en estado Done: $current_status"
+            add_comment_if_requested "$ISSUE_KEY_LOCAL"
+            $DIR/jira-issue.sh "$ISSUE_KEY_LOCAL"
+            return 0
+        fi
+        # Buscar transición de descarte
+        local transitions_json
+        transitions_json=$($DIR/jira.sh issue "$ISSUE_KEY_LOCAL" --transitions 2>/dev/null)
+        local discard_transitions
+        discard_transitions=$(echo "$transitions_json" | jq -r --arg re "$DISCARD_REGEX" '
+            (.transitions // [])
+            | map(select(
+                (.to.statusCategory.key // "" | ascii_downcase) == "done"
+                and ((.name // "" | test($re;"i")) or ((.to.name // "" | test($re;"i"))))
+            ))
+            | (.[0] // empty)
+            | if . == null then "" else "\(.id)|\(.to.name)|done" end
+        ')
+        if [[ -n "$discard_transitions" ]]; then
+            IFS='|' read -r discard_id discard_name discard_cat <<< "$discard_transitions"
+            info "Descartando ticket: $discard_name (id: $discard_id)"
+            if $DIR/jira.sh issue "$ISSUE_KEY_LOCAL" --transitions --to "$discard_id" >/dev/null 2>&1; then
+                success "Ticket descartado exitosamente: $discard_name"
+                add_comment_if_requested "$ISSUE_KEY_LOCAL"
+                $DIR/jira-issue.sh "$ISSUE_KEY_LOCAL"
+                return 0
+            else
+                error "Fallo al descartar el ticket"
+                return 1
+            fi
+        else
+            warn "No se encontró transición de descarte disponible"
+            return 1
+        fi
+    fi
+
     if [[ "$current_category" == "Done" ]]; then
         success "El issue ya está en estado Done: $current_status"
+        add_comment_if_requested "$ISSUE_KEY_LOCAL"
         $DIR/jira-issue.sh "$ISSUE_KEY_LOCAL"
         return 0
     fi
 
-    # 3. Obtener workflow del proyecto
-    info "Obteniendo workflow del proyecto $project_key..."
-    local workflow_data
-    workflow_data=$($DIR/jira.sh project statuses "$project_key" 2>/dev/null)
-    if [[ -z "$workflow_data" ]]; then
-        error "No se pudo obtener el workflow del proyecto $project_key"
-        return 1
-    fi
-
-    local issue_workflow
-    issue_workflow=$(echo "$workflow_data" | jq --arg type "$issue_type" '.[] | select(.name == $type)')
-    if [[ -z "$issue_workflow" ]]; then
-        error "No se encontró workflow para el tipo de issue: $issue_type"
-        return 1
-    fi
-
-    # 4. Identificar estado objetivo (Done)
-    info "Identificando estado final objetivo..."
-    target_status=$(find_target_done_status "$issue_workflow")
-    if [[ -z "$target_status" || "$target_status" == "null" ]]; then
-        error "No se encontró ningún estado Done en el workflow"
-        return 1
-    fi
-
-    info "Estado objetivo: $target_status"
-
-    # 5. Calcular camino de estados
-    info "Calculando camino de transiciones..."
-    status_path=$(get_status_path "$issue_workflow" "$current_status" "$target_status")
-
-    if [[ -z "$status_path" ]]; then
-        warn "No se encontró un camino directo desde $current_status hasta $target_status"
-        warn "Intentando transición directa..."
-        if execute_transition_to_status "$ISSUE_KEY_LOCAL" "$target_status"; then
-            success "Transición directa exitosa"
-        else
-            error "No fue posible realizar la transición"
-            return 1
+    # 3. Resolver por transiciones disponibles, sin forzar estados fuera del flujo
+    local max_steps=10
+    local step=1
+    while [[ $step -le $max_steps ]]; do
+        local transitions_json
+        transitions_json=$($DIR/jira.sh issue "$ISSUE_KEY_LOCAL" --transitions 2>/dev/null)
+        if [[ -z "$transitions_json" ]]; then
+            warn "No se pudieron obtener transiciones en el paso $step"
+            break
         fi
-    else
-        # 6. Ejecutar transiciones iterativamente
-        echo "$status_path" | while read -r next_status; do
-            if [[ -n "$next_status" ]]; then
-                if ! execute_transition_to_status "$ISSUE_KEY_LOCAL" "$next_status"; then
-                    warn "No se pudo transicionar a $next_status, intentando continuar..."
-                else
-                    sleep 1  # Pequeña pausa entre transiciones
-                fi
-            fi
-        done
-    fi
+
+        local pick
+        pick=$(select_next_transition "$transitions_json")
+        if [[ -z "$pick" ]]; then
+            warn "No hay transiciones permitidas (Done o In Progress única) en el paso $step"
+            break
+        fi
+
+        IFS='|' read -r tr_id tr_name tr_cat <<< "$pick"
+        info "Paso $step: aplicando transición $tr_name (id: $tr_id, cat: $tr_cat)"
+        if ! $DIR/jira.sh issue "$ISSUE_KEY_LOCAL" --transitions --to "$tr_id" >/dev/null 2>&1; then
+            warn "Fallo la transición $tr_id -> $tr_name"
+            break
+        fi
+
+        sleep 1
+        issue_data=$($DIR/jira.sh issue "$ISSUE_KEY_LOCAL" 2>/dev/null)
+        current_status=$(echo "$issue_data" | jq -r '.fields.status.name')
+        current_category=$(echo "$issue_data" | jq -r '.fields.status.statusCategory.name')
+        info "Estado tras paso $step: $current_status ($current_category)"
+        if [[ "$current_category" == "Done" ]]; then
+            success "Issue transicionado exitosamente a estado Done: $current_status"
+            add_comment_if_requested "$ISSUE_KEY_LOCAL"
+            return 0
+        fi
+        ((step++))
+    done
 
     # 7. Verificar resultado final
     echo ""

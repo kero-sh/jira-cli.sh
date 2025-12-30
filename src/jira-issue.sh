@@ -21,7 +21,7 @@ Opciones:
   --fields <jsonpath>     Especifica los campos a mostrar en formato JSON
   --jsonpath=<jsonpath>   Alias para --fields
   --full                  Muestra todos los campos disponibles
-  --resume               Muestra un resumen del issue con campos clave
+  --resume | --resumen   Muestra un resumen del issue con campos clave
   --format <format>       Formato de salida para --resume (friendly|json)
   -h, --help              Muestra esta ayuda
 
@@ -57,7 +57,7 @@ while [[ $# -gt 0 ]]; do
             JIRA_FIELDS=''
             shift
             ;;
-        --resume)
+        --resume|--resumen)
             RESUME_MODE=true
             shift
             ;;
