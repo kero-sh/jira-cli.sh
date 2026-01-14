@@ -1544,8 +1544,17 @@ if [[ -z "$JIRA_AUTH" ]]; then
     JIRA_AUTH="basic"
   elif [[ -n "$JIRA_TOKEN" ]]; then
     # Auto-detect if JIRA_TOKEN is base64 encoded Basic Auth (contains user:pass)
+    # Check if it decodes AND both parts before/after ':' are printable ASCII
     if decoded=$(echo "$JIRA_TOKEN" | base64 -d 2>/dev/null) && [[ "$decoded" == *:* ]]; then
-      JIRA_AUTH="basic"
+      # Extract parts before and after the colon
+      user_part="${decoded%%:*}"
+      pass_part="${decoded#*:}"
+      # Check if both parts are printable (no binary/control chars)
+      if [[ "$user_part" =~ ^[[:print:]]+$ ]] && [[ "$pass_part" =~ ^[[:print:]]+$ ]]; then
+        JIRA_AUTH="basic"
+      else
+        JIRA_AUTH="bearer"
+      fi
     else
       JIRA_AUTH="bearer"
     fi
