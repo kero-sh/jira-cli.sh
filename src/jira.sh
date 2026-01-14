@@ -31,6 +31,8 @@ JIRA_API_VERSION="${JIRA_API_VERSION:-3}"
 JIRA_AUTH="${JIRA_AUTH:-}"
 JIRA_EMAIL="${JIRA_EMAIL:-}"
 JIRA_API_TOKEN="${JIRA_API_TOKEN:-}"
+JIRA_USER="${JIRA_USER:-}"
+JIRA_PASSWORD="${JIRA_PASSWORD:-}"
 JIRA_PROJECT="${JIRA_PROJECT:-}"
 METHOD="GET"
 ENDPOINT=""
@@ -159,12 +161,27 @@ PARA OPCIÓN ESPECÍFICAS DE CADA SUBCOMANDO: usa 'jira <subcomando> --help'
 
 VARIABLES DE ENTORNO:
   --jira-host HOST    - URL base de Jira (default: $JIRA_HOST)
-  --jira-token TOKEN - Token OAuth Bearer (default: $JIRA_TOKEN)
-  --jira-email EMAIL - Email de tu cuenta (default: $JIRA_EMAIL)
-  --jira-api-token TOKEN - API token de Atlassian para Basic (default: $JIRA_API_TOKEN)
+  --jira-token TOKEN - Token OAuth Bearer o Basic Auth pre-codificado en base64 (default: $JIRA_TOKEN)
+  --jira-user USER   - Usuario para Basic Auth (default: $JIRA_USER)
+  --jira-password PASS - Password para Basic Auth (default: $JIRA_PASSWORD)
+  --jira-email EMAIL - Email de tu cuenta para Basic Auth (default: $JIRA_EMAIL)
+  --jira-api-token TOKEN - API token de Atlassian para Basic Auth (default: $JIRA_API_TOKEN)
   --jira-api-version NUM - Versión API: 3 (Cloud) o 2 (Server/DC) (default: $JIRA_API_VERSION)
   --jira-auth TYPE   - Tipo autenticación: basic|bearer (default: $JIRA_AUTH o autodetecta)
   --jira-project KEY - Clave de proyecto por defecto para 'create' (default: $JIRA_PROJECT)
+
+AUTENTICACIÓN:
+  Basic Auth (3 formas):
+    1. JIRA_AUTH=basic + JIRA_TOKEN=<base64_de_user:pass>
+    2. JIRA_AUTH=basic + JIRA_USER=<user> + JIRA_PASSWORD=<pass>
+    3. JIRA_AUTH=basic + JIRA_EMAIL=<email> + JIRA_API_TOKEN=<token>
+  
+  Bearer Auth:
+    JIRA_AUTH=bearer + JIRA_TOKEN=<oauth_token>
+  
+  Auto-detección (sin JIRA_AUTH):
+    - Si JIRA_TOKEN decodifica a user:pass → Basic Auth
+    - Si JIRA_TOKEN no decodifica → Bearer Auth
 
 FORMATOS DE SALIDA:
   json               - JSON formateado (por defecto)
@@ -1518,17 +1535,36 @@ if [[ "$OUTPUT" == "table" ]]; then require_cmd column; fi
 
 # Determina encabezado de autenticación
 AUTH_HEADER=""
+
+# Auto-detect JIRA_AUTH if not explicitly set
 if [[ -z "$JIRA_AUTH" ]]; then
   if [[ -n "$JIRA_EMAIL" && -n "$JIRA_API_TOKEN" ]]; then
     JIRA_AUTH="basic"
+  elif [[ -n "$JIRA_USER" && -n "$JIRA_PASSWORD" ]]; then
+    JIRA_AUTH="basic"
   elif [[ -n "$JIRA_TOKEN" ]]; then
-    JIRA_AUTH="bearer"
+    # Auto-detect if JIRA_TOKEN is base64 encoded Basic Auth (contains user:pass)
+    if decoded=$(echo "$JIRA_TOKEN" | base64 -d 2>/dev/null) && [[ "$decoded" == *:* ]]; then
+      JIRA_AUTH="basic"
+    else
+      JIRA_AUTH="bearer"
+    fi
   fi
 fi
 
+# Build AUTH_HEADER based on JIRA_AUTH type
 case "$JIRA_AUTH" in
   basic)
-    if [[ -n "$JIRA_EMAIL" && -n "$JIRA_API_TOKEN" ]]; then
+    # Priority: 1) JIRA_TOKEN (pre-encoded base64), 2) JIRA_USER+JIRA_PASSWORD, 3) JIRA_EMAIL+JIRA_API_TOKEN
+    if [[ -n "$JIRA_TOKEN" ]]; then
+      # JIRA_TOKEN is already base64 encoded Basic Auth token
+      AUTH_HEADER="Authorization: Basic $JIRA_TOKEN"
+    elif [[ -n "$JIRA_USER" && -n "$JIRA_PASSWORD" ]]; then
+      # Encode JIRA_USER:JIRA_PASSWORD to base64
+      BASIC_TOKEN=$(printf "%s:%s" "$JIRA_USER" "$JIRA_PASSWORD" | base64 | tr -d '\n')
+      AUTH_HEADER="Authorization: Basic $BASIC_TOKEN"
+    elif [[ -n "$JIRA_EMAIL" && -n "$JIRA_API_TOKEN" ]]; then
+      # Encode JIRA_EMAIL:JIRA_API_TOKEN to base64
       BASIC_TOKEN=$(printf "%s:%s" "$JIRA_EMAIL" "$JIRA_API_TOKEN" | base64 | tr -d '\n')
       AUTH_HEADER="Authorization: Basic $BASIC_TOKEN"
     fi
