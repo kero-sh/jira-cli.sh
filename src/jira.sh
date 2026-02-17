@@ -47,6 +47,8 @@ TRANSITION_SPEC=""
 CREATE_MODE=false
 PAGINATE=false
 API_MODE=false
+ASSIGN_TARGET=""
+ASSIGN_TARGET_SET=false
 API_METHOD=""
 API_FIELDS=()
 API_RAW_FIELDS=()
@@ -153,6 +155,8 @@ OPCIONES:
   --transitions      - Para issue: muestra transiciones disponibles; con --to ID ejecuta transición
   --to ID            - ID de transición a aplicar cuando se usa --transitions
   --transition SPEC  - Para issue: aplica transición por ID, nombre de transición o nombre de estado destino
+  --assign [me|email|user|none] - Asigna el issue a un usuario (me=ti mismo, none=sin asignación)
+  --unassign         - Alias para --assign none (deja el issue sin asignación)
   --shell SHELL      - Genera script de autocompletado: bash, zsh
   --dry-run          - Imprime el comando curl en lugar de ejecutarlo
   --help             - Muestra esta ayuda
@@ -323,6 +327,8 @@ Opciones:
   --transitions      Muestra transiciones disponibles
   --to ID            ID de transición a aplicar (requiere --transitions)
   --transition SPEC  Aplica transición por ID, nombre de transición o nombre de estado destino
+  --assign [me|email|user|none] Asigna el issue a un usuario
+  --unassign         Deja el issue sin asignación (alias de --assign none)
   -m, --message      Mensaje del comentario (requerido para comment)
   --comment-scan-max NUM - Límite de comentarios a escanear (default: $JIRA_ACTIVITY_COMMENT_SCAN_MAX o 100)
   --output FORMAT    Formato de salida: json, csv, table, yaml, md
@@ -336,6 +342,10 @@ Ejemplos:
   jira issue ABC-123 --transition "Done"     # Cambia a estado Done (por nombre de estado)
   jira issue ABC-123 --transition "Start Progress" # Por nombre de transición
   jira issue ABC-123 --transition 31         # Por ID de transición
+  jira issue ABC-123 --assign me            # Asignar a mi usuario
+  jira issue ABC-123 --assign user@example.com # Asignar a usuario específico
+  jira issue ABC-123 --assign none          # Dejar sin asignación
+  jira issue ABC-123 --unassign             # Dejar sin asignación (alias)
   jira issue comment ABC-123 -m "Comentario aquí"  # Agrega comentario
   echo "mensaje" | jira issue comment ABC-123 -m -  # Comentario desde pipe
 EOF
@@ -591,7 +601,7 @@ _jira_completion() {
     methods="GET POST PUT"
 
     # Opciones
-    opts="--data --token --host --output --csv-export --transitions --to --help --shell --project --summary --description --type --assignee --reporter --priority --epic --link-issue --template --dry-run -m --message"
+    opts="--data --token --host --output --csv-export --transitions --to --help --shell --project --summary --description --type --assignee --reporter --priority --epic --link-issue --template --dry-run --assign --unassign -m --message"
 
     # Formatos de salida
     formats="json csv table yaml md"
@@ -619,7 +629,7 @@ _jira_completion() {
             return 0
             ;;
         issue|issues)
-            local issue_subs="comment --transitions --to -h --help"
+            local issue_subs="comment --transitions --to --assign --unassign -h --help"
             COMPREPLY=( $(compgen -W "${issue_subs}" -- ${cur}) )
             return 0
             ;;
@@ -733,6 +743,8 @@ _jira() {
         '--csv-export[Export CSV para search]:type:(all current)' \
         '--transitions[Mostrar transiciones disponibles]' \
         '--to[Aplicar transición con ID]:transition id' \
+        '--assign[Asignar issue a usuario]:assign target' \
+        '--unassign[Dejar issue sin asignación]' \
         '-m[Mensaje del comentario]:message' \
         '--message[Mensaje del comentario]:message' \
         '--shell[Generar autocompletado]:shell:(bash zsh)' \
@@ -800,7 +812,8 @@ _jira() {
                 '--csv-export[Export CSV para search]:type:(all current)' \
                 '--transitions[Mostrar transiciones disponibles]' \
                 '--to[Aplicar transición con ID]:transition id' \
-                '-m[Mensaje del comentario]:message' \
+                '--assign[Asignar issue a usuario]:assign target' \
+                '--unassign[Dejar issue sin asignación]' \
                 '--message[Mensaje del comentario]:message' \
                 '--project[Clave de proyecto (key)]:project key' \
                 '--summary[Resumen del issue]:summary' \
@@ -1123,6 +1136,10 @@ for ((i=0; i<${#temp_args[@]}; i++)); do
       CREATE_TEMPLATE="${temp_args[i+1]}"; ((i++)) ;;
     --transition)
       TRANSITION_SPEC="${temp_args[i+1]}"; ((i++)) ;;
+    --assign)
+      ASSIGN_TARGET="${temp_args[i+1]}"; ((i++)) ;;
+    --unassign)
+      ASSIGN_TARGET="none" ;;
     --workflow)
       # Flag opcional con valor
       if [[ $((i+1)) -lt ${#temp_args[@]} && ! "${temp_args[i+1]}" =~ ^- ]]; then
@@ -1435,9 +1452,9 @@ while [[ $# -gt 0 ]]; do
       # Flag sin valor, ya procesado en el primer pase
       shift
       ;;
-    --data|--token|--host|--output|--csv-export|--transitions|--to|--transition|--project|--summary|--description|--type|--assignee|--reporter|--priority|--epic|--link-issue|--template|--workflow|--from-date|--to-date|--lookback|--limit|--jira-host|--jira-token|--jira-email|--jira-api-token|--jira-api-version|--jira-auth|--jira-project|--comment-scan-max|-m|--message|--method|--field|--raw-field|--header|--input|-f|-F|-H)
+    --data|--token|--host|--output|--csv-export|--transitions|--to|--transition|--assign|--unassign|--project|--summary|--description|--type|--assignee|--reporter|--priority|--epic|--link-issue|--template|--workflow|--from-date|--to-date|--lookback|--limit|--jira-host|--jira-token|--jira-email|--jira-api-token|--jira-api-version|--jira-auth|--jira-project|--comment-scan-max|-m|--message|--method|--field|--raw-field|--header|--input|-f|-F|-H)
       # Ya procesados en el primer pase, saltarlos
-      if [[ "$1" =~ ^--(data|token|host|output|csv-export|to|transition|project|summary|description|type|assignee|reporter|priority|epic|link-issue|template|workflow|from-date|to-date|lookback|limit|jira-host|jira-token|jira-email|jira-api-token|jira-api-version|jira-auth|jira-project|comment-scan-max|message|method|field|raw-field|header|input)$ ]] || [[ "$1" =~ ^-[mfFH]$ ]]; then
+      if [[ "$1" =~ ^--(data|token|host|output|csv-export|to|transition|assign|unassign|project|summary|description|type|assignee|reporter|priority|epic|link-issue|template|workflow|from-date|to-date|lookback|limit|jira-host|jira-token|jira-email|jira-api-token|jira-api-version|jira-auth|jira-project|comment-scan-max|message|method|field|raw-field|header|input)$ ]] || [[ "$1" =~ ^-[mfFH]$ ]]; then
         shift 2
       else
         shift
@@ -1625,6 +1642,89 @@ if [[ -n "$TRANSITION_SPEC" ]]; then
   if [[ -z "$DATA" ]]; then
     DATA="{\"transition\":{\"id\":\"$TRANSITION_TARGET\"}}"
   fi
+fi
+
+# Si se solicita una asignación con --assign, preparar PUT automático
+if [[ -n "$ASSIGN_TARGET" ]]; then
+  if [[ ! "$resource" =~ ^(issue|issues)$ ]] || [[ -z "$identifier" ]]; then
+    echo "Error: --assign requiere 'jira issue <KEY>'" >&2
+    exit 1
+  fi
+  
+  # Obtener el accountId del usuario actual si se usa "me"
+  if [[ "$ASSIGN_TARGET" == "me" ]]; then
+    if [[ "$DRY_RUN" == "true" ]]; then
+      # En modo dry-run, usar un placeholder
+      if [[ "$JIRA_API_VERSION" == "3" ]]; then
+        ASSIGN_TARGET="USER_ACCOUNT_ID_PLACEHOLDER"
+      else
+        ASSIGN_TARGET="USER_NAME_PLACEHOLDER"
+      fi
+    else
+      _myself_resp=$(execute_curl --request GET -H "Content-Type: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} "$JIRA_HOST/rest/api/$JIRA_API_VERSION/myself")
+      if [[ "$JIRA_API_VERSION" == "3" ]]; then
+        _my_account_id=$(printf '%s' "$_myself_resp" | jq -r '.accountId // empty')
+        if [[ -z "$_my_account_id" ]]; then
+          echo "Error: No se pudo obtener el accountId del usuario actual" >&2
+          exit 1
+        fi
+        ASSIGN_TARGET="$_my_account_id"
+      else
+        _my_name=$(printf '%s' "$_myself_resp" | jq -r '.name // empty')
+        if [[ -z "$_my_name" ]]; then
+          echo "Error: No se pudo obtener el name del usuario actual" >&2
+          exit 1
+        fi
+        ASSIGN_TARGET="$_my_name"
+      fi
+    fi
+  elif [[ "$ASSIGN_TARGET" == "none" ]]; then
+    # Para Jira Cloud API v3, usamos null para desasignar
+    if [[ "$JIRA_API_VERSION" == "3" ]]; then
+      ASSIGN_TARGET="null"
+    else
+      # Para Jira Server API v2, usamos nombre vacío
+      ASSIGN_TARGET=""
+    fi
+  else
+    # Para email o username, buscar el accountId
+    if [[ "$ASSIGN_TARGET" == *@* ]]; then
+      # Es un email, buscar por query
+      _user_search_resp=$(execute_curl --request GET -H "Content-Type: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} "$JIRA_HOST/rest/api/$JIRA_API_VERSION/user/search?query=$ASSIGN_TARGET")
+    else
+      # Es un username, buscar por username
+      if [[ "$JIRA_API_VERSION" == "3" ]]; then
+        _user_search_resp=$(execute_curl --request GET -H "Content-Type: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} "$JIRA_HOST/rest/api/$JIRA_API_VERSION/user/search?query=$ASSIGN_TARGET")
+      else
+        _user_search_resp=$(execute_curl --request GET -H "Content-Type: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} "$JIRA_HOST/rest/api/$JIRA_API_VERSION/user?username=$ASSIGN_TARGET")
+      fi
+    fi
+    
+    _found_account_id=$(printf '%s' "$_user_search_resp" | jq -r 'if type == "array" and length > 0 then .[0] | if has("accountId") then .accountId else .name end // empty else empty end')
+    if [[ -z "$_found_account_id" ]]; then
+      echo "Error: No se encontró el usuario '$ASSIGN_TARGET'" >&2
+      exit 1
+    fi
+    ASSIGN_TARGET="$_found_account_id"
+  fi
+  
+  # Preparar el payload para asignación
+  if [[ "$JIRA_API_VERSION" == "3" ]]; then
+    if [[ "$ASSIGN_TARGET" == "null" ]]; then
+      DATA="{\"fields\":{\"assignee\":null}}"
+    else
+      DATA="{\"fields\":{\"assignee\":{\"accountId\":\"$ASSIGN_TARGET\"}}}"
+    fi
+  else
+    if [[ -z "$ASSIGN_TARGET" ]]; then
+      DATA="{\"fields\":{\"assignee\":{\"name\":\"\"}}}"
+    else
+      DATA="{\"fields\":{\"assignee\":{\"name\":\"$ASSIGN_TARGET\"}}}"
+    fi
+  fi
+  
+  ENDPOINT="/issue/$identifier"
+  METHOD="PUT"
 fi
 
 # Resolución previa para 'jira user get <term>'
