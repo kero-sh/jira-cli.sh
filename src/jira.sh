@@ -127,6 +127,7 @@ RECURSOS DISPONIBLES:
   project <key> --workflow [issuetype] - Muestra workflow y transiciones para un tipo de issue
   issue [key]        - Obtiene issue(s). Sin key lista los asignados
                        Con --transitions muestra transiciones disponibles
+                       Con --assign/--unassign gestiona la asignación del issue
   issue-for-branch [key] - Obtiene datos de un issue para crear una rama (campos limitados)
   search [jql]       - Busca con JQL. Sin JQL busca asignados a ti
   create             - Crea un issue (usa --data)
@@ -204,6 +205,9 @@ EJEMPLOS:
   jira issue ABC-123
   jira issue ABC-123 --transitions
   jira issue ABC-123 --transitions --to 611
+  jira issue ABC-123 --assign me              # Asignar a mi usuario
+  jira issue ABC-123 --assign user@dom.com    # Asignar a usuario específico
+  jira issue ABC-123 --unassign               # Dejar sin asignación
   jira search 'project=ABC AND status=Open'
   jira create --data '{"fields":{"project":{"key":"ABC"},"summary":"Nuevo ticket","issuetype":{"name":"Task"}}}'
   jira create --data ./payload.json
