@@ -19,6 +19,7 @@ Options:
     --summary=<title>        Branch title (sanitized)
     --prefix <prefix>        Branch prefix (feature, bugfix, hotfix, chore, etc)
     --prefix=<prefix>        Branch prefix (alternative form)
+    -F                       Create the branch from the fresh remote default branch (origin/<default>)
     -h, --help               Show this help and exit
 
 Examples:
@@ -62,11 +63,16 @@ parse_arguments() {
     ISSUE_KEY=""
     BRANCH_SUMMARY=""
     BRANCH_PREFIX=""
+    FRESH_REMOTE_BASE=false
 
     while [[ $# -gt 0 ]]; do
         case $1 in
             -m)
                 RENAME_MODE=true
+                shift
+                ;;
+            -F)
+                FRESH_REMOTE_BASE=true
                 shift
                 ;;
             --summary=*)
@@ -422,6 +428,29 @@ get_default_branch() {
     echo "$default_branch"
 }
 
+ensure_clean_worktree_or_confirm() {
+    info "Checking git status before creating branch..."
+    git status -sb
+
+    local changes
+    changes=$(git status --porcelain)
+
+    if [ -z "$changes" ]; then
+        info "Working tree is clean."
+        return 0
+    fi
+
+    warning "There are uncommitted changes in the working tree."
+    echo "$changes"
+    info ""
+    info "Recommendation: clean your working tree (git add/commit, git restore, git stash, etc.) before creating a new branch."
+
+    if ! confirm "Do you want to CONTINUE creating the branch even with pending changes?"; then
+        info "Operation cancelled so you can clean the repository before continuing."
+        exit 1
+    fi
+}
+
 check_if_default_branch() {
     local current_branch="$1"
     local default_branch=$(get_default_branch)
@@ -552,13 +581,26 @@ rename_branch() {
 
 create_branch() {
     local branch_name="$1"
-    git checkout -b "$branch_name"
+    local base_ref="$2"
+
+    if [ -n "$base_ref" ]; then
+        info "Creating branch '$branch_name' from '$base_ref'..."
+        git checkout -b "$branch_name" "$base_ref"
+    else
+        info "Creating branch '$branch_name' from current HEAD..."
+        git checkout -b "$branch_name"
+    fi
 }
 
 # ==================== MAIN EXECUTION ====================
 
 main() {
     parse_arguments "$@"
+
+    info "Fetching latest changes from remote..."
+    if ! git fetch --prune origin; then
+        warning "Failed to fetch from remote 'origin'. Proceeding with local refs."
+    fi
 
     local issue=""
     local issue_key="$ISSUE_KEY"
@@ -588,7 +630,27 @@ main() {
     if [ "$RENAME_MODE" = true ]; then
         rename_branch "$branch_name"
     else
-        create_branch "$branch_name"
+        local base_ref=""
+
+        if [ "$FRESH_REMOTE_BASE" = true ]; then
+            local default_branch
+            default_branch=$(get_default_branch)
+
+            if [ -z "$default_branch" ]; then
+                error "Could not determine remote default branch (origin/HEAD)."
+                exit 1
+            fi
+
+            base_ref="origin/$default_branch"
+
+            if ! git rev-parse --verify "$base_ref" >/dev/null 2>&1; then
+                error "Remote branch '$base_ref' does not exist. Make sure you've fetched from remote."
+                exit 1
+            fi
+        fi
+
+        ensure_clean_worktree_or_confirm
+        create_branch "$branch_name" "$base_ref"
     fi
 }
 
