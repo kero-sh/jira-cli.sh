@@ -1222,6 +1222,11 @@ if [[ $# -gt 0 ]] && [[ "$1" == "help" ]]; then
   fi
 fi
 
+# Alias: 'jira comment <key>' => 'jira issue comment <key>'
+if [[ $# -gt 0 && "$1" == "comment" ]]; then
+  set -- issue comment "${@:2}"
+fi
+
 # Check if the first argument is an HTTP method or a resource
 if [[ $# -gt 0 ]] && [[ "$1" =~ ^(GET|POST|PUT)$ ]]; then
   # Traditional syntax with HTTP method
