@@ -129,6 +129,7 @@ RECURSOS DISPONIBLES:
                        Con --transitions muestra transiciones disponibles
                        Con --assign/--unassign gestiona la asignación del issue
   issue-for-branch [key] - Obtiene datos de un issue para crear una rama (campos limitados)
+  open <key>         - Abre el issue en el navegador (usa \$JIRA_HOST/browse/<key>)
   search [jql]       - Busca con JQL. Sin JQL busca asignados a ti
   create             - Crea un issue (usa --data)
   priority           - Lista todas las prioridades
@@ -1220,6 +1221,42 @@ if [[ $# -gt 0 ]] && [[ "$1" == "help" ]]; then
   else
     show_help; exit 0
   fi
+fi
+
+# Comando directo: 'jira open KEY' → abre el issue en el navegador
+if [[ $# -gt 0 && "$1" == "open" ]]; then
+  shift
+  if [[ $# -lt 1 ]]; then
+    echo "Error: 'jira open' requiere una clave de issue" >&2
+    echo "Ejemplo: jira open ABC-123" >&2
+    exit 1
+  fi
+
+  ISSUE_KEY="$1"
+
+  if [[ -z "$JIRA_HOST" ]]; then
+    error "Debes especificar la URL de Jira con --host o la variable de entorno JIRA_HOST" >&2
+    exit 1
+  fi
+
+  # Asegurar que el host tenga esquema para que open/xdg-open funcione
+  _open_base="${JIRA_HOST%/}"
+  if [[ ! "$_open_base" =~ ^https?:// ]]; then
+    _open_base="https://$_open_base"
+  fi
+  ISSUE_URL="${_open_base}/browse/$ISSUE_KEY"
+
+  if command -v open >/dev/null 2>&1; then
+    open "$ISSUE_URL"
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$ISSUE_URL"
+  else
+    echo "No se encontró un comando para abrir el navegador (open/xdg-open)." >&2
+    echo "URL del issue: $ISSUE_URL" >&2
+    exit 1
+  fi
+
+  exit 0
 fi
 
 # Alias: 'jira comment <key>' => 'jira issue comment <key>'
