@@ -341,9 +341,13 @@ Main Jira API client. Supports traditional and simplified syntax.
 jira priority --output table
 jira project PROJECT-123
 jira project components PROJECT-123
+jira project components PROJECT-123 --export --format json > comps.json
+jira project components PROJECT-123 --import --format json < comps.json
 jira project statuses PROJECT-123
 jira workflow --output table
 jira issue ABC-123
+jira issue ABC-123 --move PROJ2              # Clone issue into another project
+jira move ABC-123 --to-project PROJ2         # Same (short form)
 jira search 'project=ABC AND status=Open'
 jira create --project ABC --summary "Title" --description "Desc" --type Task
 
@@ -353,6 +357,40 @@ jira GET /project/PROJECT-123/statuses
 jira GET /workflow
 jira POST /issue --data payload.json
 ```
+
+### Moving an issue to another project
+
+Clone an issue into another project (creates a new issue and links it to the original). Useful for moving work between boards.
+
+```bash
+# Using issue subcommand
+jira issue ABC-123 --move PROJ2
+
+# Short form
+jira move ABC-123 --to-project PROJ2
+
+# Non-interactive (no prompts for issue type or component creation)
+jira move ABC-123 --to-project PROJ2 --components Frontend,Backend --yes
+```
+
+Options for move:
+- `--to-project PROJ` (required with `jira move`) – target project key
+- `--components A,B` – override components on the new issue
+- `--yes` – skip prompts (issue type fallback, create missing components)
+
+### Project components (export/import)
+
+Export or import the component list of a project. Formats: `json`, `csv`, `yaml`, `tsv`.
+
+```bash
+# Export components to a file
+jira project components PROJ --export --format json > comps.json
+
+# Import components from stdin
+jira project components PROJ --import --format json < comps.json
+```
+
+You cannot use `--export` and `--import` in the same command.
 
 ### jira-issue
 
@@ -684,7 +722,8 @@ shellunittest test/ --format=json > test-results.json
 - `test_helpers.sh` - Tests for helper functions (logging, colors, formatting)
 - `test_md2jira.sh` - Tests for Markdown to Jira converter
 - `test_help.sh` - Tests for help flags across all commands (50+ tests)
-- `test_project_components.sh` - Tests for project components
+- `test_project_components.sh` - Tests for project components (list, export, import)
+- `test_issue_move.sh` - Tests for moving an issue to another project (`jira move` / `issue --move`)
 
 ### Available Assertions
 

@@ -12,6 +12,7 @@ _jira() {
         'projects:Get project(s)'
         'issue:Get issue(s)'
         'issues:Get issue(s)'
+        'move:Move issue to another project'
         'search:Search with JQL'
         'create:Create an issue'
         'priority:List priorities'
@@ -47,6 +48,12 @@ _jira() {
         'yaml:YAML format'
         'md:Markdown table'
     )
+    local export_formats=(
+        'json:JSON'
+        'csv:CSV'
+        'yaml:YAML'
+        'tsv:TSV'
+    )
 
     _arguments -C \
         '1: :->command' \
@@ -70,6 +77,13 @@ _jira() {
         '--link-issue[Issue key to link]:issue key' \
         '--template[Base JSON template]:file:_files' \
         '--dry-run[Print curl command without executing]' \
+        '--move[Move issue to project]:project key' \
+        '--components[Override components for move]:components' \
+        '--yes[Non-interactive move]' \
+        '--to-project[Target project for move]:project key' \
+        '--export[Export components to stdout]' \
+        '--import[Import components from stdin]' \
+        '--format[Export/import format]:format:->export_formats' \
         '--help[Show help]' \
         '*: :->args'
 
@@ -95,6 +109,9 @@ _jira() {
                 issue|issues)
                     _message "Issue key (e.g. ABC-123)"
                     ;;
+                move)
+                    _message "Issue key (e.g. ABC-123)"
+                    ;;
                 user|users)
                     _values "user subcommands" \
                       'get:Full profile by email/username/accountId' \
@@ -108,6 +125,9 @@ _jira() {
             ;;
         formats)
             _describe 'output formats' formats
+            ;;
+        export_formats)
+            _describe 'export/import formats' export_formats
             ;;
         args)
             _arguments \
@@ -130,6 +150,9 @@ _jira() {
                 '--template[Base JSON template]:file:_files' \
                 '--shell[Shell]:shell:(bash zsh)' \
                 '--dry-run[Print curl command without executing]' \
+                '--export[Export components]' \
+                '--import[Import components]' \
+                '--format[Export/import format]:format:(json csv yaml tsv)' \
                 '--help[Help]'
             ;;
     esac

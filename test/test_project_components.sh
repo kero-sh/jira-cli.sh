@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Test script for 'jira issue components' command
+# Test script for 'jira project components' command (list, export, import)
 
 set -e
 
@@ -70,6 +70,36 @@ test_command \
     "Main help includes project components" \
     "bash $SRC_DIR/jira.sh --help" \
     "project components"
+
+# Export: --dry-run still does GET to project/PROJ/components
+test_command \
+    "Export with --dry-run uses GET project/TEST/components" \
+    "JIRA_HOST='https://test.atlassian.net' JIRA_TOKEN='test' bash $SRC_DIR/jira.sh project components TEST --export --format json --dry-run 2>&1" \
+    "project/TEST/components"
+
+# Export help mentions --export/--import/--format
+test_command \
+    "Project help mentions export and import" \
+    "bash $SRC_DIR/jira.sh project -h" \
+    "export"
+
+# Error when both --export and --import
+test_command \
+    "Error when using both --export and --import" \
+    "bash $SRC_DIR/jira.sh project components PROJ --export --import 2>&1" \
+    "No se puede usar --export y --import"
+
+# Error when --format is invalid (with --export)
+test_command \
+    "Error when --format is invalid" \
+    "bash $SRC_DIR/jira.sh project components PROJ --export --format xml 2>&1" \
+    "format debe ser uno de"
+
+# Import --dry-run: empty list should show no POST; one component should show POST
+test_command \
+    "Import --dry-run with one component shows POST component" \
+    "echo '[{\"name\":\"Comp1\",\"description\":\"\"}]' | JIRA_HOST='https://test.atlassian.net' JIRA_TOKEN='test' bash $SRC_DIR/jira.sh project components PROJ --import --format json --dry-run 2>&1" \
+    "component"
 
 echo ""
 echo "========================================"

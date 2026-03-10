@@ -9,16 +9,17 @@ _jira_completion() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     # Available resources
-    resources="project projects issue issues search create priority priorities status statuses user users issuetype issuetypes field fields resolution resolutions component components version versions"
+    resources="project projects issue issues move search create priority priorities status statuses user users issuetype issuetypes field fields resolution resolutions component components version versions"
 
     # HTTP methods
     methods="GET POST PUT"
 
     # Options
-    opts="--data --token --host --output --csv-export --transitions --to --help --shell --project --summary --description --type --assignee --reporter --priority --epic --link-issue --template --dry-run"
+    opts="--data --token --host --output --csv-export --transitions --to --help --shell --project --summary --description --type --assignee --reporter --priority --epic --link-issue --template --dry-run --export --import --format --move --components --yes"
 
     # Output formats
     formats="json csv table yaml md"
+    export_formats="json csv yaml tsv"
 
     # If we're at the first position, suggest resources or HTTP methods
     if [[ ${COMP_CWORD} -eq 1 ]]; then
@@ -30,6 +31,10 @@ _jira_completion() {
     case "${prev}" in
         --output)
             COMPREPLY=( $(compgen -W "${formats}" -- ${cur}) )
+            return 0
+            ;;
+        --format)
+            COMPREPLY=( $(compgen -W "${export_formats}" -- ${cur}) )
             return 0
             ;;
         user|users)
@@ -55,6 +60,26 @@ _jira_completion() {
             # Suggest some common JQL examples
             local jql_examples="'assignee=currentUser()' 'project=' 'status=Open' 'priority=High'"
             COMPREPLY=( $(compgen -W "${jql_examples}" -- ${cur}) )
+            return 0
+            ;;
+        project|projects)
+            local project_subs="components statuses -h --help"
+            COMPREPLY=( $(compgen -W "${project_subs}" -- ${cur}) )
+            return 0
+            ;;
+        issue|issues)
+            local issue_subs="comment --transitions --to --assign --unassign --move --components --yes -h --help"
+            COMPREPLY=( $(compgen -W "${issue_subs}" -- ${cur}) )
+            return 0
+            ;;
+        move)
+            local move_opts="--to-project --components --yes -h --help"
+            COMPREPLY=( $(compgen -W "${move_opts}" -- ${cur}) )
+            return 0
+            ;;
+        components)
+            local component_opts="--export --import --format --output -h --help"
+            COMPREPLY=( $(compgen -W "${component_opts}" -- ${cur}) )
             return 0
             ;;
         *)

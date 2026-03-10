@@ -83,10 +83,19 @@ USER_ACTIVITY_LIMIT=100
 # Subcommands/state for 'project'
 PROJECT_SUBCOMMAND=""
 PROJECT_WORKFLOW_ISSUETYPE=""
+# Export/import components
+COMPONENTS_EXPORT=false
+COMPONENTS_IMPORT=false
+COMPONENTS_FORMAT=""
 
 # Subcommands/state for 'issue'
 ISSUE_SUBCOMMAND=""
 COMMENT_MESSAGE=""
+# Move issue to another project (jira [issue] KEY --move PROJ | jira move KEY --to-project PROJ)
+ISSUE_MOVE_MODE=false
+ISSUE_MOVE_TARGET_PROJECT=""
+ISSUE_MOVE_COMPONENTS_OVERRIDE=""
+ISSUE_MOVE_YES=false
 
 # Dependency checks (minimal, only when needed)
 require_cmd() { command -v "$1" >/dev/null 2>&1 || { error "Required command not found: $1"; exit 127; }; }
@@ -128,6 +137,8 @@ RECURSOS DISPONIBLES:
   issue [key]        - Obtiene issue(s). Sin key lista los asignados
                        Con --transitions muestra transiciones disponibles
                        Con --assign/--unassign gestiona la asignación del issue
+                       Con --move PROJ clona el issue en otro proyecto (mover entre tableros)
+  move [key]         - Atajo: jira move KEY --to-project PROJ (equivale a issue KEY --move PROJ)
   issue-for-branch [key] - Obtiene datos de un issue para crear una rama (campos limitados)
   open <key>         - Abre el issue en el navegador (usa \$JIRA_HOST/browse/<key>)
   search [jql]       - Busca con JQL. Sin JQL busca asignados a ti
@@ -159,6 +170,9 @@ OPCIONES:
   --transition SPEC  - Para issue: aplica transición por ID, nombre de transición o nombre de estado destino
   --assign [me|email|user|none] - Asigna el issue a un usuario (me=ti mismo, none=sin asignación)
   --unassign         - Alias para --assign none (deja el issue sin asignación)
+  --move PROJ        - Para issue: clona el issue en el proyecto PROJ (mover entre tableros)
+  --components A,B   - Con --move: lista de componentes destino (sobrescribe los del origen)
+  --yes              - Con --move: no preguntar (tipo de issue, crear componentes)
   --shell SHELL      - Genera script de autocompletado: bash, zsh
   --dry-run          - Imprime el comando curl en lugar de ejecutarlo
   --help             - Muestra esta ayuda
@@ -301,6 +315,9 @@ Comandos:
 Opciones:
   --output FORMAT    Formato de salida: json, csv, table, yaml, md
   --workflow [issuetype]  Filtra el workflow por tipo de issue (ej: Task, Bug, Story)
+  --export           (solo components) Exporta la lista de componentes a stdout
+  --import           (solo components) Importa componentes desde stdin
+  --format FORMAT    (con --export/--import) json, csv, yaml o tsv (por defecto: json)
   -h, --help         Muestra esta ayuda
 
 Ejemplos:
@@ -308,6 +325,8 @@ Ejemplos:
   jira project CORE               # Obtiene el proyecto CORE
   jira project --output table     # Lista en formato tabla
   jira project components PROJ    # Lista componentes del proyecto PROJ
+  jira project components PROJ --export --format json > comps.json
+  jira project components PROJ --import --format json < comps.json
   jira project statuses PROJ      # Obtiene workflows/estados del proyecto PROJ
   jira project ANDES --workflow Task   # Muestra el workflow para tipo Task en proyecto ANDES
   jira project ANDES --workflow Story  # Muestra el workflow para tipo Story en proyecto ANDES
@@ -319,11 +338,14 @@ show_help_issue() {
   cat << EOF
 Uso: jira issue [key] [opciones]
      jira issue comment [key] -m "mensaje" [opciones]
+     jira [key] --move PROJ   # Mover (clonar) issue a otro proyecto
+     jira move [key] --to-project PROJ [opciones]
 
 Descripción:
   Obtiene información de issue(s). Sin key lista los asignados a ti.
   Con --transitions muestra transiciones disponibles.
   Con 'comment' agrega un comentario al issue.
+  Con --move PROJ clona el issue en el proyecto PROJ (crea components/labels si faltan, enlaza al original).
 
 Comandos:
   comment [key]      Agrega un comentario al issue especificado
@@ -334,6 +356,9 @@ Opciones:
   --transition SPEC  Aplica transición por ID, nombre de transición o nombre de estado destino
   --assign [me|email|user|none] Asigna el issue a un usuario
   --unassign         Deja el issue sin asignación (alias de --assign none)
+  --move PROJ        Clona el issue en el proyecto PROJ (mover entre tableros/proyectos)
+  --components A,B   Lista de componentes para el issue destino (sobrescribe los del origen)
+  --yes              Modo no interactivo: no pregunta tipo ni creación de componentes
   -m, --message      Mensaje del comentario (requerido para comment)
   --comment-scan-max NUM - Límite de comentarios a escanear (default: $JIRA_ACTIVITY_COMMENT_SCAN_MAX o 100)
   --output FORMAT    Formato de salida: json, csv, table, yaml, md
@@ -342,15 +367,13 @@ Opciones:
 Ejemplos:
   jira issue                      # Lista issues asignados a ti
   jira issue ABC-123              # Obtiene el issue ABC-123
+  jira issue ABC-123 --move PROJ2 # Clona ABC-123 en el proyecto PROJ2
+  jira ABC-123 --move PROJ2      # Mismo efecto (atajo)
+  jira move ABC-123 --to-project PROJ2 --components Frontend,Backend --yes
   jira issue ABC-123 --transitions # Muestra transiciones disponibles
   jira issue ABC-123 --transitions --to 611  # Ejecuta transición
   jira issue ABC-123 --transition "Done"     # Cambia a estado Done (por nombre de estado)
-  jira issue ABC-123 --transition "Start Progress" # Por nombre de transición
-  jira issue ABC-123 --transition 31         # Por ID de transición
   jira issue ABC-123 --assign me            # Asignar a mi usuario
-  jira issue ABC-123 --assign user@example.com # Asignar a usuario específico
-  jira issue ABC-123 --assign none          # Dejar sin asignación
-  jira issue ABC-123 --unassign             # Dejar sin asignación (alias)
   jira issue comment ABC-123 -m "Comentario aquí"  # Agrega comentario
   echo "mensaje" | jira issue comment ABC-123 -m -  # Comentario desde pipe
 EOF
@@ -388,7 +411,7 @@ Descripción:
 
 Opciones:
   --data '{json}'    Datos JSON para crear (también acepta ruta a archivo)
-  --project KEY      Clave de proyecto (ej: ABC)
+  --project KEY      Proyecto/tablero donde se crea el issue (obligatorio si no usas --data)
   --summary TEXT     Resumen/título del issue
   --description TXT  Descripción del issue
   --type NAME        Tipo de issue (ej: Task, Bug)
@@ -600,16 +623,17 @@ _jira_completion() {
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
     # Recursos disponibles
-    resources="project projects issue issues search create priority priorities status statuses user users issuetype issuetypes field fields resolution resolutions component components version versions"
+    resources="project projects issue issues move search create priority priorities status statuses user users issuetype issuetypes field fields resolution resolutions component components version versions"
 
     # Métodos HTTP
     methods="GET POST PUT"
 
     # Opciones
-    opts="--data --token --host --output --csv-export --transitions --to --help --shell --project --summary --description --type --assignee --reporter --priority --epic --link-issue --template --dry-run --assign --unassign -m --message"
+    opts="--data --token --host --output --csv-export --transitions --to --help --shell --project --summary --description --type --assignee --reporter --priority --epic --link-issue --template --dry-run --assign --unassign -m --message --export --import --format --move --components --yes"
 
     # Formatos de salida
     formats="json csv table yaml md"
+    export_formats="json csv yaml tsv"
 
     # Si estamos en la primera posición, sugerir recursos o métodos HTTP
     if [[ ${COMP_CWORD} -eq 1 ]]; then
@@ -629,12 +653,21 @@ _jira_completion() {
             return 0
             ;;
         project|projects)
-            local project_subs="components -h --help"
+            local project_subs="components statuses -h --help"
             COMPREPLY=( $(compgen -W "${project_subs}" -- ${cur}) )
             return 0
             ;;
+        components)
+            local component_opts="--export --import --format --output -h --help"
+            COMPREPLY=( $(compgen -W "${component_opts}" -- ${cur}) )
+            return 0
+            ;;
+        --format)
+            COMPREPLY=( $(compgen -W "${export_formats}" -- ${cur}) )
+            return 0
+            ;;
         issue|issues)
-            local issue_subs="comment --transitions --to --assign --unassign -h --help"
+            local issue_subs="comment --transitions --to --assign --unassign --move --components --yes -h --help"
             COMPREPLY=( $(compgen -W "${issue_subs}" -- ${cur}) )
             return 0
             ;;
@@ -642,6 +675,11 @@ _jira_completion() {
             # Después de 'issue comment', sugerir opciones de comentario
             local comment_opts="-m --message --output -h --help"
             COMPREPLY=( $(compgen -W "${comment_opts}" -- ${cur}) )
+            return 0
+            ;;
+        move)
+            local move_opts="--to-project --components --yes -h --help"
+            COMPREPLY=( $(compgen -W "${move_opts}" -- ${cur}) )
             return 0
             ;;
         create)
@@ -702,6 +740,7 @@ _jira() {
         'projects:Obtiene proyecto(s)'
         'issue:Obtiene issue(s)'
         'issues:Obtiene issue(s)'
+        'move:Mueve issue a otro proyecto'
         'search:Busca con JQL'
         'create:Crea un issue'
         'priority:Lista prioridades'
@@ -764,6 +803,10 @@ _jira() {
         '--link-issue[Clave de issue a vincular]:issue key' \
         '--template[Plantilla JSON base]:file:_files' \
         '--dry-run[Imprimir comando curl sin ejecutar]' \
+        '--move[Mover issue a proyecto]:project key' \
+        '--components[Components para move]:components' \
+        '--yes[Modo no interactivo para move]' \
+        '--to-project[Proyecto destino para move]:project key' \
         '--help[Mostrar ayuda]' \
         '*: :->args'
 
@@ -790,6 +833,9 @@ _jira() {
                     _values "issue subcommands" \
                       'comment:Agregar comentario a un issue' \
                       || _message "Clave del issue (ej: ABC-123)"
+                    ;;
+                move)
+                    _message "Clave del issue (ej: ABC-123)"
                     ;;
                 user|users)
                     _values "user subcommands" \
@@ -1049,10 +1095,230 @@ build_endpoint() {
   esac
 }
 
+# Move issue to another project (clone + link). Uses globals: identifier, ISSUE_MOVE_*,
+# JIRA_HOST, AUTH_HEADER, JIRA_API_VERSION, execute_curl, DRY_RUN, ISSUE_MOVE_YES.
+do_issue_move() {
+  local _base="$JIRA_HOST/rest/api/${JIRA_API_VERSION}"
+  local _issue_url="$_base/issue/$identifier"
+  local _fields="project,summary,description,issuetype,components,labels"
+  local _src_json _src_summary _src_desc _src_type _src_components _src_labels
+  local _issuetypes_json _target_type_id _target_type_name
+  local _comps_list _comps_to_ensure _comp_name _target_components_json _comp_id
+  local _payload _create_resp _new_key _project_key
+
+  if [[ -z "$JIRA_HOST" ]] || [[ -z "$AUTH_HEADER" ]]; then
+    error "JIRA_HOST y autenticación son necesarios para mover el issue." >&2
+    return 1
+  fi
+
+  # 1) Obtener issue origen
+  _src_json=$(execute_curl -H "Accept: application/json" -H "$AUTH_HEADER" "${_issue_url}?fields=${_fields}" 2>/dev/null)
+  if ! printf '%s' "$_src_json" | jq -e '.key' >/dev/null 2>&1; then
+    error "No se pudo obtener el issue $identifier. ¿Existe y tienes permiso?" >&2
+    printf '%s' "$_src_json" | jq -r '.errorMessages[]? // .errors | to_entries[]? | "\(.key): \(.value)"' 2>/dev/null | head -5 >&2
+    return 1
+  fi
+
+  _src_summary=$(printf '%s' "$_src_json" | jq -r '.fields.summary // ""')
+  _src_desc=$(printf '%s' "$_src_json" | jq -c '.fields.description // empty')
+  _src_type=$(printf '%s' "$_src_json" | jq -r '.fields.issuetype.name // "Task"')
+  _src_components=$(printf '%s' "$_src_json" | jq -r '[.fields.components[]? | .name] | join("\n")')
+  _src_labels=$(printf '%s' "$_src_json" | jq -r '(.fields.labels // []) | join("\n")')
+
+  # 2) Resolver tipo de issue en proyecto destino
+  _issuetypes_json=$(execute_curl -H "Accept: application/json" -H "$AUTH_HEADER" "$_base/issuetype" 2>/dev/null)
+  _target_type_id=$(printf '%s' "$_issuetypes_json" | jq -r --arg n "$_src_type" '
+    if type == "array" then . else (.values // .) end
+    | map(select(.name == $n)) | .[0].id // empty
+  ')
+  if [[ -z "$_target_type_id" ]]; then
+    _target_type_id=$(printf '%s' "$_issuetypes_json" | jq -r '
+      (if type == "array" then . else (.values // []) end)
+      | map(select(.name == "Task")) | .[0].id // .[0].id // empty
+    ')
+    _target_type_name=$(printf '%s' "$_issuetypes_json" | jq -r '
+      (if type == "array" then . else (.values // []) end) | .[0].name // "Task"
+    ')
+    if [[ -z "$_target_type_id" ]]; then
+      _target_type_id=$(printf '%s' "$_issuetypes_json" | jq -r '(if type == "array" then . else (.values // []) end) | .[0].id // empty')
+      _target_type_name=$(printf '%s' "$_issuetypes_json" | jq -r '(if type == "array" then . else (.values // []) end) | .[0].name // "Task"')
+    fi
+    if [[ "$ISSUE_MOVE_YES" != "true" ]]; then
+      echo "El tipo '$_src_type' no existe en el proyecto destino. Tipos disponibles:" >&2
+      printf '%s' "$_issuetypes_json" | jq -r '
+        (if type == "array" then . else (.values // []) end)
+        | to_entries[] | "  \(.key + 1). \(.value.name)" 
+      ' >&2
+      local _num
+      read -r -p "Número (o nombre del tipo) a usar [$_target_type_name]: " _num
+      if [[ -n "$_num" ]]; then
+        if [[ "$_num" =~ ^[0-9]+$ ]]; then
+          _target_type_id=$(printf '%s' "$_issuetypes_json" | jq -r --argjson i "$((_num - 1))" '
+            (if type == "array" then . else (.values // []) end) | .[$i].id // empty
+          ')
+          _target_type_name=$(printf '%s' "$_issuetypes_json" | jq -r --argjson i "$((_num - 1))" '
+            (if type == "array" then . else (.values // []) end) | .[$i].name // empty
+          ')
+        else
+          _target_type_id=$(printf '%s' "$_issuetypes_json" | jq -r --arg n "$_num" '
+            (if type == "array" then . else (.values // []) end) | map(select(.name == $n)) | .[0].id // empty
+          ')
+          _target_type_name="$_num"
+        fi
+      fi
+    fi
+    if [[ -z "$_target_type_id" ]]; then
+      _target_type_id=$(printf '%s' "$_issuetypes_json" | jq -r '(if type == "array" then . else (.values // []) end) | .[0].id // empty')
+      _target_type_name=$(printf '%s' "$_issuetypes_json" | jq -r '(if type == "array" then . else (.values // []) end) | .[0].name // "Task"')
+    fi
+  else
+    _target_type_name="$_src_type"
+  fi
+
+  if [[ -z "$_target_type_id" ]]; then
+    error "No se pudo resolver un tipo de issue para el proyecto destino." >&2
+    return 1
+  fi
+
+  # 3) Lista de components a asignar (override o copia del origen)
+  if [[ -n "$ISSUE_MOVE_COMPONENTS_OVERRIDE" ]]; then
+    _comps_to_ensure=$(printf '%s' "$ISSUE_MOVE_COMPONENTS_OVERRIDE" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$')
+  else
+    _comps_to_ensure=$(printf '%s' "$_src_components" | grep -v '^$')
+  fi
+
+  _target_components_json="[]"
+  if [[ -n "$_comps_to_ensure" ]]; then
+    _target_components_json=$(printf '%s' "$_comps_to_ensure" | while IFS= read -r _comp_name; do
+      [[ -z "$_comp_name" ]] && continue
+      _comp_id=$(execute_curl -H "Accept: application/json" -H "$AUTH_HEADER" "$_base/project/$ISSUE_MOVE_TARGET_PROJECT/components" 2>/dev/null \
+        | jq -r --arg n "$_comp_name" '.[] | select(.name == $n) | .id' | head -1)
+      if [[ -z "$_comp_id" ]]; then
+        if [[ "$ISSUE_MOVE_YES" != "true" ]]; then
+          read -r -p "El componente '$_comp_name' no existe en $ISSUE_MOVE_TARGET_PROJECT. ¿Crear y asignar? [Y/n]: " _yn
+          _yn="${_yn:-Y}"
+          if [[ "${_yn^^}" != "Y" && "${_yn^^}" != "YES" ]]; then
+            continue
+          fi
+        fi
+        local _create_comp
+        _create_comp=$(execute_curl --request POST -H "Content-Type: application/json" -H "$AUTH_HEADER" \
+          -H "Accept: application/json" --data "{\"name\":$(printf '%s' "$_comp_name" | jq -Rs .),\"project\":$(printf '%s' "$ISSUE_MOVE_TARGET_PROJECT" | jq -Rs .)}" \
+          "$_base/component" 2>/dev/null)
+        _comp_id=$(printf '%s' "$_create_comp" | jq -r '.id // empty')
+        if [[ -n "$_comp_id" ]]; then
+          echo "Componente creado: $_comp_name" >&2
+        else
+          echo "Error creando componente '$_comp_name', se omite." >&2
+          continue
+        fi
+      fi
+      if [[ -n "$_comp_id" ]]; then
+        echo "{\"id\":\"$_comp_id\"}"
+      fi
+    done | jq -s -R 'split("\n") | map(select(length > 0)) | map(fromjson)')
+  fi
+
+  # 4) Payload para crear el issue en el proyecto destino
+  _payload=$(jq -n \
+    --arg proj "$ISSUE_MOVE_TARGET_PROJECT" \
+    --argjson itid "$_target_type_id" \
+    --arg sum "$_src_summary" \
+    --argjson comps "$_target_components_json" \
+    --argjson labs "$(printf '%s' "$_src_labels" | grep -v '^$' | jq -R -s -c 'split("\n") | map(select(length > 0))')" \
+    '
+      {
+        fields: {
+          project: { key: $proj },
+          issuetype: { id: ($itid | tostring) },
+          summary: $sum,
+          components: $comps,
+          labels: $labs
+        }
+      }
+    ')
+  # Añadir description si existe (v3 ADF o string)
+  if [[ -n "$_src_desc" ]] && [[ "$_src_desc" != "null" ]]; then
+    if printf '%s' "$_src_desc" | jq -e 'type == "object"' >/dev/null 2>&1; then
+      _payload=$(printf '%s' "$_payload" | jq --argjson d "$_src_desc" '.fields.description = $d')
+    else
+      local _desc_str
+      _desc_str=$(printf '%s' "$_src_desc" | jq -r '. // ""')
+      if [[ -n "$_desc_str" ]]; then
+        if [[ "$JIRA_API_VERSION" == "3" ]]; then
+          _payload=$(printf '%s' "$_payload" | jq --arg t "$_desc_str" '.fields.description = {
+            type: "doc", version: 1,
+            content: [{ type: "paragraph", content: [{ type: "text", text: $t }] }]
+          }')
+        else
+          _payload=$(printf '%s' "$_payload" | jq --arg t "$_desc_str" '.fields.description = $t')
+        fi
+      fi
+    fi
+  fi
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "[DRY-RUN] POST $_base/issue" >&2
+    printf '%s' "$_payload" | jq . >&2
+    return 0
+  fi
+
+  _create_resp=$(execute_curl --request POST -H "Content-Type: application/json" -H "$AUTH_HEADER" \
+    -H "Accept: application/json" --data "$_payload" "$_base/issue" 2>/dev/null)
+  _new_key=$(printf '%s' "$_create_resp" | jq -r '.key // empty')
+  if [[ -z "$_new_key" ]]; then
+    error "No se pudo crear el issue en el proyecto $ISSUE_MOVE_TARGET_PROJECT." >&2
+    printf '%s' "$_create_resp" | jq -r '.errorMessages[]? // .errors | to_entries[]? | "\(.key): \(.value)"' 2>/dev/null | head -10 >&2
+    return 1
+  fi
+
+  echo "Creado: $_new_key (proyecto $ISSUE_MOVE_TARGET_PROJECT)"
+  # Enlace opcional: relacionar issue origen con el nuevo
+  _payload=$(jq -n --arg inward "$identifier" --arg outward "$_new_key" '
+    { type: { name: "Relates" }, inwardIssue: { key: $inward }, outwardIssue: { key: $outward } }
+  ')
+  execute_curl --request POST -H "Content-Type: application/json" -H "$AUTH_HEADER" \
+    -H "Accept: application/json" --data "$_payload" "$_base/issueLink" 2>/dev/null || true
+  return 0
+}
+
 # Argument parsing
 USING_SIMPLIFIED_SYNTAX=false
 resource=""
 identifier=""
+
+# Normalize move syntax so the rest of the script sees "issue KEY --move PROJ"
+if [[ $# -ge 1 && "$1" == "move" ]]; then
+  shift
+  if [[ $# -lt 1 ]]; then
+    echo "Error: 'jira move' requiere clave de issue y --to-project" >&2
+    echo "Ejemplo: jira move ABC-123 --to-project PROJ2" >&2
+    exit 1
+  fi
+  _move_key="$1"
+  shift
+  _new_args=(issue "$_move_key")
+  while [[ $# -gt 0 ]]; do
+    if [[ "$1" == "--to-project" && $# -ge 2 ]]; then
+      _new_args+=(--move "$2")
+      shift; shift
+    else
+      _new_args+=("$1")
+      shift
+    fi
+  done
+  set -- "${_new_args[@]}"
+fi
+
+# Normalize "jira KEY --move PROJ" to "jira issue KEY --move PROJ"
+if [[ $# -ge 2 && "$1" =~ ^[A-Z][A-Z0-9_]*-[0-9]+$ ]]; then
+  for ((_i=2;_i<=$#;_i++)); do
+    if [[ "${!_i}" == "--move" ]]; then
+      set -- issue "$1" "${@:2}"
+      break
+    fi
+  done
+fi
 
 # First pass: process all options to get the flags
 temp_args=("$@")
@@ -1115,12 +1381,29 @@ for ((i=0; i<${#temp_args[@]}; i++)); do
       COMMENT_SCAN_MAX="${temp_args[i+1]}"
       ((i++))
       ;;
+    --move)
+      ISSUE_MOVE_TARGET_PROJECT="${temp_args[i+1]}"
+      ((i++))
+      ISSUE_MOVE_MODE=true
+      ;;
+    --components)
+      ISSUE_MOVE_COMPONENTS_OVERRIDE="${temp_args[i+1]}"
+      ((i++))
+      ;;
+    --yes)
+      ISSUE_MOVE_YES=true
+      ;;
     --data)
       DATA="${temp_args[i+1]}"
       ((i++))
       ;;
     --project)
-      CREATE_PROJECT="${temp_args[i+1]}"; ((i++)) ;;
+      # Solo asignar si el siguiente argumento existe y no es otra opción (no empieza con -)
+      if [[ $((i+1)) -lt ${#temp_args[@]} && -n "${temp_args[i+1]}" && ! "${temp_args[i+1]}" =~ ^- ]]; then
+        CREATE_PROJECT="${temp_args[i+1]}"
+      fi
+      ((i++))
+      ;;
     --summary)
       CREATE_SUMMARY="${temp_args[i+1]}"; ((i++)) ;;
     --description)
@@ -1177,6 +1460,13 @@ for ((i=0; i<${#temp_args[@]}; i++)); do
       DRY_RUN=true ;;
     --paginate)
       PAGINATE=true ;;
+    # Opciones para 'project components' export/import
+    --export)
+      COMPONENTS_EXPORT=true ;;
+    --import)
+      COMPONENTS_IMPORT=true ;;
+    --format)
+      COMPONENTS_FORMAT="${temp_args[i+1]}"; ((i++)) ;;
     # Opciones para 'api'
     --method)
       API_METHOD="${temp_args[i+1]}"; ((i++)) ;;
@@ -1196,6 +1486,24 @@ for ((i=0; i<${#temp_args[@]}; i++)); do
   esac
 done
 
+# Validar opciones de export/import de componentes
+if [[ "$COMPONENTS_EXPORT" == "true" && "$COMPONENTS_IMPORT" == "true" ]]; then
+  echo "Error: No se puede usar --export y --import a la vez" >&2
+  exit 1
+fi
+if [[ "$COMPONENTS_EXPORT" == "true" || "$COMPONENTS_IMPORT" == "true" ]]; then
+  if [[ -z "$COMPONENTS_FORMAT" ]]; then
+    COMPONENTS_FORMAT="json"
+  fi
+  case "$COMPONENTS_FORMAT" in
+    json|csv|yaml|tsv) ;;
+    *)
+      echo "Error: --format debe ser uno de: json, csv, yaml, tsv" >&2
+      exit 1
+      ;;
+  esac
+fi
+
 # If --help was used without a resource, show general help
 if [[ "$SHOW_HELP_FLAG" == "true" ]] && [[ $# -eq 0 ]]; then
   show_help; exit 0
@@ -1207,7 +1515,7 @@ if [[ $# -gt 0 ]] && [[ "$1" == "help" ]]; then
     case "$2" in
       user|users)       show_help_user; exit 0 ;;
       project|projects) show_help_project; exit 0 ;;
-      issue|issues)     show_help_issue; exit 0 ;;
+      issue|issues|move) show_help_issue; exit 0 ;;
       search)           show_help_search; exit 0 ;;
       create)           show_help_create; exit 0 ;;
       priority)         show_help_priority; exit 0 ;;
@@ -1498,9 +1806,9 @@ while [[ $# -gt 0 ]]; do
       # Flag sin valor, ya procesado en el primer pase
       shift
       ;;
-    --data|--token|--host|--output|--csv-export|--transitions|--to|--transition|--assign|--unassign|--project|--summary|--description|--type|--assignee|--reporter|--priority|--epic|--link-issue|--template|--workflow|--from-date|--to-date|--lookback|--limit|--jira-host|--jira-token|--jira-email|--jira-api-token|--jira-api-version|--jira-auth|--jira-project|--comment-scan-max|-m|--message|--method|--field|--raw-field|--header|--input|-f|-F|-H)
-      # Ya procesados en el primer pase, saltarlos
-      if [[ "$1" =~ ^--(data|token|host|output|csv-export|to|transition|assign|unassign|project|summary|description|type|assignee|reporter|priority|epic|link-issue|template|workflow|from-date|to-date|lookback|limit|jira-host|jira-token|jira-email|jira-api-token|jira-api-version|jira-auth|jira-project|comment-scan-max|message|method|field|raw-field|header|input)$ ]] || [[ "$1" =~ ^-[mfFH]$ ]]; then
+    --data|--token|--host|--output|--csv-export|--transitions|--to|--transition|--assign|--unassign|--project|--summary|--description|--type|--assignee|--reporter|--priority|--epic|--link-issue|--template|--workflow|--from-date|--to-date|--lookback|--limit|--jira-host|--jira-token|--jira-email|--jira-api-token|--jira-api-version|--jira-auth|--jira-project|--comment-scan-max|-m|--message|--method|--field|--raw-field|--header|--input|--export|--import|--format|-f|-F|-H|--move|--components|--yes)
+      # Ya procesados en el primer pase, saltarlos. Solo shift 2 si la opción lleva valor (--format, --output, etc.)
+      if [[ "$1" =~ ^--(format|output|data|token|host|csv-export|to|transition|project|summary|description|type|assignee|reporter|priority|epic|link-issue|template|workflow|from-date|to-date|lookback|limit|jira-host|jira-token|jira-email|jira-api-token|jira-api-version|jira-auth|jira-project|comment-scan-max|message|method|field|raw-field|header|input|move|components)$ ]] && [[ $# -ge 2 && ! "$2" =~ ^- ]]; then
         shift 2
       else
         shift
@@ -1543,12 +1851,30 @@ if [[ "$TRANSITION_TARGET_SET" == "true" ]]; then
   fi
 fi
 
+# Validación modo move
+if [[ "$ISSUE_MOVE_MODE" == "true" ]]; then
+  if [[ ! "$resource" =~ ^(issue|issues)$ ]] || [[ -z "$identifier" ]]; then
+    echo "Error: --move requiere un issue con clave (ej: jira issue ABC-123 --move PROJ2)" >&2
+    exit 1
+  fi
+  if [[ -z "$ISSUE_MOVE_TARGET_PROJECT" ]]; then
+    echo "Error: --move requiere el proyecto destino (ej: jira issue ABC-123 --move PROJ2)" >&2
+    exit 1
+  fi
+fi
+
 # Validaciones
 if [[ -z "$JIRA_HOST" ]]; then
   error "Debes especificar la URL de Jira con --host o la variable de entorno JIRA_HOST" >&2
   exit 1
 fi
 
+# Asegurar que JIRA_HOST tenga esquema (https:// por defecto). Sin esto, curl puede usar http://,
+# recibir un redirect a https:// y al seguir la redirección reenviar como GET sin body, y Jira
+# responde "project is required" porque no recibe el JSON del POST.
+if [[ ! "$JIRA_HOST" =~ ^https?:// ]]; then
+  JIRA_HOST="https://${JIRA_HOST}"
+fi
 
 if [[ -z "$ENDPOINT" ]]; then
   echo "Debes especificar el endpoint o recurso" >&2
@@ -1647,6 +1973,12 @@ case "$JIRA_AUTH" in
     fi
     ;;
 esac
+
+# Ejecutar move y salir (evita el flujo normal GET/POST del issue)
+if [[ "$ISSUE_MOVE_MODE" == "true" ]] && [[ "$resource" =~ ^(issue|issues)$ ]] && [[ -n "$identifier" ]] && [[ -n "$ISSUE_MOVE_TARGET_PROJECT" ]]; then
+  do_issue_move
+  exit $?
+fi
 
 # Resolver --transition SPEC (por nombre de transición, nombre de estado o ID)
 if [[ -n "$TRANSITION_SPEC" ]]; then
@@ -2214,8 +2546,8 @@ prepare_create_payload() {
   local final_file
   final_file=$(mktemp)
 
-  # Preparar prioridad de proyecto: flag > JSON > env
-  # Pasamos flag y env por separado para que flag sobrescriba y env solo complete si falta en el payload
+  # Proyecto: --project tiene prioridad absoluta; si se pasó, no usar JIRA_PROJECT ni el base.
+  # Asignar .fields.project como objeto completo.
   jq \
     --arg p_flag "$CREATE_PROJECT" \
     --arg p_env "$JIRA_PROJECT" \
@@ -2231,12 +2563,12 @@ prepare_create_payload() {
     '
     . as $o
     | .fields = (.fields // {})
-    | (if $p_flag != "" then .fields.project.key = $p_flag
-       elif (.fields.project.key // "") == "" and $p_env != "" then .fields.project.key = $p_env
+    | (if $p_flag != "" then .fields.project = { key: ($p_flag | ascii_upcase) }
+       elif ((.fields.project.key // "") == "") and ($p_env != "") then .fields.project = { key: ($p_env | ascii_upcase) }
        else . end)
     | (if $s   != "" then .fields.summary     = $s else . end)
     | (if $d   != "" then .fields.description = $d else . end)
-    | (if $t   != "" then .fields.issuetype.name = $t else . end)
+    | (if $t   != "" then .fields.issuetype = { name: $t } else . end)
     | (if $a   != "" then .fields.assignee.name  = $a else . end)
     | (if $r   != "" then .fields.reporter.name  = $r else . end)
     | (if $pr  != "" then .fields.priority.name  = $pr else . end)
@@ -2273,6 +2605,88 @@ else
   REQUEST_URL="$JIRA_HOST/rest/api/${JIRA_API_VERSION}$ENDPOINT"
 fi
 
+# Import de componentes: leer stdin, parsear y POST por cada componente
+if [[ "$PROJECT_SUBCOMMAND" == "components" && "$COMPONENTS_IMPORT" == "true" && -n "$identifier" ]]; then
+  if [[ -z "$JIRA_HOST" ]]; then
+    error "JIRA_HOST no está definido (--host o variable de entorno)"
+    exit 1
+  fi
+  if [[ -z "$AUTH_HEADER" ]]; then
+    error "Autenticación no configurada (JIRA_TOKEN o JIRA_EMAIL+JIRA_API_TOKEN)"
+    exit 1
+  fi
+  _import_input=$(cat)
+  _components_json=""
+  case "$COMPONENTS_FORMAT" in
+    json)
+      _components_json=$(printf '%s' "$_import_input" | jq -c 'if type == "array" then . else [.] end')
+      ;;
+    yaml)
+      require_cmd yq
+      _components_json=$(printf '%s' "$_import_input" | yq -c 'if type == "array" then . else [.] end')
+      ;;
+    csv|tsv)
+      if command -v yq >/dev/null 2>&1; then
+        _parser="csv"
+        [[ "$COMPONENTS_FORMAT" == "tsv" ]] && _parser="tsv"
+        _components_json=$(printf '%s' "$_import_input" | yq -p "$_parser" -o json -I0 -c 'if type == "array" then . else [.] end | map(select(.name != null and .name != ""))')
+      else
+        _sep=$'\t'
+        [[ "$COMPONENTS_FORMAT" == "csv" ]] && _sep=','
+        _components_json=$(printf '%s' "$_import_input" | awk -v FS="$_sep" '
+          NR==1 { for(i=1;i<=NF;i++) h[$i]=i; next }
+          {
+            name=""; desc=""; assigneeType=""; leadAccountId=""
+            if (h["name"]) name=$h["name"]
+            if (h["description"]) desc=$h["description"]
+            if (h["assigneeType"]) assigneeType=$h["assigneeType"]
+            if (h["leadAccountId"]) leadAccountId=$h["leadAccountId"]
+            gsub(/"/, "\\\"", name); gsub(/"/, "\\\"", desc)
+            printf "{\"name\":\"%s\",\"description\":\"%s\",\"assigneeType\":\"%s\",\"leadAccountId\":\"%s\"}\n", name, desc, assigneeType, leadAccountId
+          }
+        ' | jq -s -c 'map(select(.name != ""))')
+      fi
+      ;;
+    *)
+      _components_json="[]"
+      ;;
+  esac
+  if [[ -z "$_components_json" ]] || ! printf '%s' "$_components_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
+    echo "Error: No se pudo parsear el contenido como lista de componentes (formato: $COMPONENTS_FORMAT)" >&2
+    exit 1
+  fi
+  _count=$(printf '%s' "$_components_json" | jq 'length')
+  _created=0
+  _failed=0
+  _post_url="$JIRA_HOST/rest/api/${JIRA_API_VERSION}/component"
+  for _idx in $(seq 0 $((_count - 1))); do
+    _comp=$(printf '%s' "$_components_json" | jq -c --argjson i "$_idx" '.[$i]')
+    _name=$(printf '%s' "$_comp" | jq -r '.name // ""')
+    [[ -z "$_name" ]] && continue
+    _payload=$(printf '%s' "$_comp" | jq -c --arg proj "$identifier" '
+      { name: .name, project: $proj }
+      + (if .description != null and .description != "" then { description: .description } else {} end)
+      + (if .assigneeType != null and .assigneeType != "" then { assigneeType: .assigneeType } else {} end)
+      + (if .leadAccountId != null and .leadAccountId != "" then { leadAccountId: .leadAccountId } else {} end)
+    ')
+    if [[ "$DRY_RUN" == "true" ]]; then
+      echo "[DRY-RUN] POST $_post_url" "$_payload" >&2
+      _created=$((_created + 1))
+    else
+      _resp=$(execute_curl --request POST -H "Content-Type: application/json" -H "$AUTH_HEADER" --data "$_payload" "$_post_url" 2>/dev/null)
+      if printf '%s' "$_resp" | jq -e '.id // .name' >/dev/null 2>&1; then
+        echo "Creado: $_name" >&2
+        _created=$((_created + 1))
+      else
+        echo "Error creando '$_name': $_resp" >&2
+        _failed=$((_failed + 1))
+      fi
+    fi
+  done
+  echo "Importados: $_created, errores: $_failed" >&2
+  exit 0
+fi
+
 # Ejecuta la consulta
 if [[ -n "$EARLY_RESPONSE" ]]; then
   RESPONSE="$EARLY_RESPONSE"
@@ -2307,6 +2721,15 @@ else
     fi
   elif [[ "$CREATE_MODE" == "true" || ( "$METHOD" == "POST" && "$ENDPOINT" == "/issue" ) ]]; then
     FINAL_DATA_FILE=$(prepare_create_payload)
+    if [[ -f "$FINAL_DATA_FILE" ]]; then
+      _proj_key=$(jq -r '.fields.project.key // empty' "$FINAL_DATA_FILE" 2>/dev/null)
+      if [[ -z "$_proj_key" ]]; then
+        error "Al crear un issue, el proyecto es obligatorio. Usa --project KEY o define JIRA_PROJECT." >&2
+        error "Ejemplo: jira create --project opsai --summary \"Título\" --description \"Descripción\"" >&2
+        rm -f "$FINAL_DATA_FILE"
+        exit 1
+      fi
+    fi
     curl_args+=(--data @"$FINAL_DATA_FILE")
   elif [[ "$ISSUE_SUBCOMMAND" == "comment" && "$METHOD" == "POST" ]]; then
     # Construir payload para comentario
@@ -2496,6 +2919,43 @@ else
   fi
 fi
 
+# Tras crear un issue con éxito: mostrar resumen (summary, type, desc, estado) y enlace web (browse), no el JSON de la API
+CREATE_SHOW_SUMMARY=false
+if [[ "$CREATE_MODE" == "true" ]] && printf '%s' "$RESPONSE" | jq -e '.key and (has("errors") | not)' >/dev/null 2>&1; then
+  _key=$(printf '%s' "$RESPONSE" | jq -r '.key')
+  _get_url="${JIRA_HOST%/}/rest/api/${JIRA_API_VERSION}/issue/${_key}"
+  _issue_json=$(execute_curl --request GET -H "Accept: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} "$_get_url" 2>/dev/null)
+  _browse="${JIRA_HOST%/}/browse/${_key}"
+  if printf '%s' "$_issue_json" | jq -e '.fields' >/dev/null 2>&1; then
+    _summary=$(printf '%s' "$_issue_json" | jq -r '.fields.summary // "—"')
+    _type=$(printf '%s' "$_issue_json" | jq -r '.fields.issuetype.name // "—"')
+    _status=$(printf '%s' "$_issue_json" | jq -r '.fields.status.name // "—"')
+    _desc_raw=$(printf '%s' "$_issue_json" | jq -r '.fields.description // ""')
+    if [[ "$_desc_raw" == "" || "$_desc_raw" == "null" ]]; then
+      _desc="—"
+    elif printf '%s' "$_desc_raw" | jq -e 'type == "object"' >/dev/null 2>&1; then
+      _desc=$(printf '%s' "$_desc_raw" | jq -r '[.. | .text? // empty] | join(" ") | if length > 0 then . else "(ver en web)" end' 2>/dev/null || echo "(ver en web)")
+    else
+      _desc="$_desc_raw"
+    fi
+  else
+    _summary="${CREATE_SUMMARY:—-}"
+    _type="${CREATE_TYPE:—-}"
+    _status="—"
+    _desc="${CREATE_DESCRIPTION:—-}"
+  fi
+  [[ ${#_desc} -gt 200 ]] && _desc="${_desc:0:200}..."
+  jq -n \
+    --arg key "$_key" \
+    --arg summary "$_summary" \
+    --arg issuetype "$_type" \
+    --arg description "$_desc" \
+    --arg status "$_status" \
+    --arg browse "$_browse" \
+    '{key:$key,summary:$summary,issuetype:$issuetype,description:$description,status:$status,browse:$browse}'
+  CREATE_SHOW_SUMMARY=true
+fi
+
 # Para transiciones que responden 204 (sin cuerpo), generar mensaje útil
 if [[ "$TRANSITION_TARGET_SET" == "true" ]]; then
   TRANSITION_ISSUE_KEY="${identifier:-}"
@@ -2589,7 +3049,46 @@ if [[ -n "$PROJECT_WORKFLOW_ISSUETYPE" ]]; then
   IS_SINGLE_OBJECT=false
 fi
 
+# Export de componentes: normalizar a name, description, assigneeType, leadAccountId y salir en COMPONENTS_FORMAT
+if [[ "$COMPONENTS_EXPORT" == "true" && "$ENDPOINT" =~ /project/[^/]+/components$ ]]; then
+  _norm=$(printf '%s' "$RESPONSE" | jq -c '
+    if type == "array" then . else [.] end
+    | map({
+        name: (.name // ""),
+        description: (.description // ""),
+        assigneeType: (.assigneeType // ""),
+        leadAccountId: ((.lead.accountId // .leadAccountId // "") | tostring)
+      })
+  ')
+  case "$COMPONENTS_FORMAT" in
+    json)
+      echo "$_norm" | jq .
+      exit 0
+      ;;
+    csv)
+      echo "$_norm" | jq -r 'if length > 0 then (["name","description","assigneeType","leadAccountId"], (.[] | [.name, .description, .assigneeType, .leadAccountId])) | @csv else "name,description,assigneeType,leadAccountId" end'
+      exit 0
+      ;;
+    tsv)
+      echo "$_norm" | jq -r 'if length > 0 then (["name","description","assigneeType","leadAccountId"], (.[] | [.name, .description, .assigneeType, .leadAccountId])) | @tsv else "name\tdescription\tassigneeType\tleadAccountId" end'
+      exit 0
+      ;;
+    yaml)
+      require_cmd yq
+      echo "$_norm" | jq . | yq -P
+      exit 0
+      ;;
+    *)
+      echo "$_norm" | jq .
+      exit 0
+      ;;
+  esac
+fi
+
 # Formato de salida
+if [[ "$CREATE_SHOW_SUMMARY" == "true" ]]; then
+  exit 0
+fi
 case "$OUTPUT" in
   json)
     # Formato especial para --workflow
