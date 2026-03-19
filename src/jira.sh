@@ -1125,13 +1125,14 @@ do_issue_move() {
   _src_components=$(printf '%s' "$_src_json" | jq -r '[.fields.components[]? | .name] | join("\n")')
   _src_labels=$(printf '%s' "$_src_json" | jq -r '(.fields.labels // []) | join("\n")')
 
-  # 2) Resolver tipo de issue en proyecto destino
+  # 2) Resolver tipo de issue en proyecto destino (tipos centrales: misma lista global)
   _issuetypes_json=$(execute_curl -H "Accept: application/json" -H "$AUTH_HEADER" "$_base/issuetype" 2>/dev/null)
   _target_type_id=$(printf '%s' "$_issuetypes_json" | jq -r --arg n "$_src_type" '
     if type == "array" then . else (.values // .) end
     | map(select(.name == $n)) | .[0].id // empty
   ')
   if [[ -z "$_target_type_id" ]]; then
+    _issuetypes_json="${_issuetypes_json:-$(execute_curl -H "Accept: application/json" -H "$AUTH_HEADER" "$_base/issuetype" 2>/dev/null)}"
     _target_type_id=$(printf '%s' "$_issuetypes_json" | jq -r '
       (if type == "array" then . else (.values // []) end)
       | map(select(.name == "Task")) | .[0].id // .[0].id // empty
@@ -1181,10 +1182,11 @@ do_issue_move() {
   fi
 
   # 3) Lista de components a asignar (override o copia del origen)
+  # Con set -e, grep sin coincidencias devuelve 1 y sale el script; || true evita eso
   if [[ -n "$ISSUE_MOVE_COMPONENTS_OVERRIDE" ]]; then
-    _comps_to_ensure=$(printf '%s' "$ISSUE_MOVE_COMPONENTS_OVERRIDE" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$')
+    _comps_to_ensure=$(printf '%s' "$ISSUE_MOVE_COMPONENTS_OVERRIDE" | tr ',' '\n' | sed 's/^ *//;s/ *$//' | grep -v '^$' || true)
   else
-    _comps_to_ensure=$(printf '%s' "$_src_components" | grep -v '^$')
+    _comps_to_ensure=$(printf '%s' "$_src_components" | grep -v '^$' || true)
   fi
 
   _target_components_json="[]"
@@ -1225,7 +1227,7 @@ do_issue_move() {
     --argjson itid "$_target_type_id" \
     --arg sum "$_src_summary" \
     --argjson comps "$_target_components_json" \
-    --argjson labs "$(printf '%s' "$_src_labels" | grep -v '^$' | jq -R -s -c 'split("\n") | map(select(length > 0))')" \
+    --argjson labs "$(printf '%s' "$_src_labels" | grep -v '^$' || true | jq -R -s -c 'split("\n") | map(select(length > 0))')" \
     '
       {
         fields: {
@@ -1277,8 +1279,16 @@ do_issue_move() {
   _payload=$(jq -n --arg inward "$identifier" --arg outward "$_new_key" '
     { type: { name: "Relates" }, inwardIssue: { key: $inward }, outwardIssue: { key: $outward } }
   ')
+  _link_ok=false
   execute_curl --request POST -H "Content-Type: application/json" -H "$AUTH_HEADER" \
-    -H "Accept: application/json" --data "$_payload" "$_base/issueLink" 2>/dev/null || true
+    -H "Accept: application/json" --data "$_payload" "$_base/issueLink" 2>/dev/null && _link_ok=true || true
+
+  echo ""
+  echo "--- Resumen ---"
+  echo "  Origen:    $identifier"
+  echo "  Nuevo:     $_new_key (proyecto $ISSUE_MOVE_TARGET_PROJECT)"
+  echo "  Enlace:    Relates entre $identifier y $_new_key $([ "$_link_ok" = true ] && echo "(creado)" || echo "(omitido o fallido)")"
+  echo "-------------"
   return 0
 }
 
