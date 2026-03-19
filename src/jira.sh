@@ -328,8 +328,8 @@ Ejemplos:
   jira project components PROJ --export --format json > comps.json
   jira project components PROJ --import --format json < comps.json
   jira project statuses PROJ      # Obtiene workflows/estados del proyecto PROJ
-  jira project ANDES --workflow Task   # Muestra el workflow para tipo Task en proyecto ANDES
-  jira project ANDES --workflow Story  # Muestra el workflow para tipo Story en proyecto ANDES
+  jira project PROJ --workflow Task   # Muestra el workflow para tipo Task en proyecto PROJ
+  jira project PROJ --workflow Story  # Muestra el workflow para tipo Story en proyecto PROJ
 EOF
 }
 
@@ -944,7 +944,7 @@ build_endpoint() {
           # El filtrado por issuetype se hará después de obtener la respuesta
         else
           echo "Error: 'jira project --workflow' requiere una clave de proyecto" >&2
-          echo "Ejemplo: jira project ANDES --workflow Task" >&2
+          echo "Ejemplo: jira project PROJ --workflow Task" >&2
           exit 1
         fi
       elif [[ -n "$identifier" ]]; then

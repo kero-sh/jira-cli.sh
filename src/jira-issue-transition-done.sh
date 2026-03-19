@@ -19,7 +19,7 @@ Descripción:
 
 Opciones:
   -h, --help         Muestra esta ayuda
-    --tickets LIST     Lista de issues separados por comas (ej: ANDES-1,ANDES-2)
+    --tickets LIST     Lista de issues separados por comas (ej: ISSUE-1,ISSUE-2)
   -m, --message "txt"  Agrega comentario al finalizar (si queda en Done)
   --discard           Descarta el ticket en lugar de llevarlo a Done
 
