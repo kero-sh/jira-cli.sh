@@ -120,6 +120,11 @@ build_request_url() {
         REQUEST_URL="$JIRA_HOST/rest/api/${JIRA_API_VERSION}$ENDPOINT"
     fi
 
+    # Jira Cloud API v3: /search removido → /search/jql
+    if [[ "$JIRA_API_VERSION" == "3" ]] && [[ "$REQUEST_URL" == *"/rest/api/3/search?"* ]] && [[ "$REQUEST_URL" != *"/rest/api/3/search/jql?"* ]]; then
+        REQUEST_URL="${REQUEST_URL//\/rest\/api\/3\/search?/\/rest\/api\/3\/search\/jql?}"
+    fi
+
     echo "$REQUEST_URL"
 }
 

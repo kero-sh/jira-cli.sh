@@ -108,18 +108,27 @@ get_jql_total() {
     local JIRA_API_VERSION="$3"
     local AUTH_HEADER="$4"
     
-    local jql_encoded
-    jql_encoded=$(jq -rn --arg s "$jql" '$s|@uri')
-    local url="$JIRA_HOST/rest/api/${JIRA_API_VERSION}/search?jql=$jql_encoded&maxResults=0&fields=none"
-    
     local response
-    if type execute_curl >/dev/null 2>&1; then
-        response=$(execute_curl --request GET -H "Content-Type: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} "$url")
+    if [[ "$JIRA_API_VERSION" == "3" ]]; then
+        local _payload
+        _payload=$(jq -n --arg jql "$jql" '{jql: $jql}')
+        if type execute_curl >/dev/null 2>&1; then
+            response=$(execute_curl --request POST -H "Content-Type: application/json" -H "Accept: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} --data "$_payload" "$JIRA_HOST/rest/api/3/search/approximate-count")
+        else
+            response=$(curl --compressed --silent --location --request POST -H "Content-Type: application/json" -H "Accept: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} --data "$_payload" "$JIRA_HOST/rest/api/3/search/approximate-count")
+        fi
+        printf '%s' "$response" | jq -r '.count // .total // .issueCount // 0'
     else
-        response=$(curl --compressed --silent --location --request GET -H "Content-Type: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} "$url")
+        local jql_encoded
+        jql_encoded=$(jq -rn --arg s "$jql" '$s|@uri')
+        local url="$JIRA_HOST/rest/api/${JIRA_API_VERSION}/search?jql=$jql_encoded&maxResults=0&fields=none"
+        if type execute_curl >/dev/null 2>&1; then
+            response=$(execute_curl --request GET -H "Content-Type: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} "$url")
+        else
+            response=$(curl --compressed --silent --location --request GET -H "Content-Type: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} "$url")
+        fi
+        printf '%s' "$response" | jq -r '.total // 0'
     fi
-    
-    printf '%s' "$response" | jq -r '.total // 0'
 }
 
 # Fetch issue list for a JQL query with minimal fields
@@ -143,8 +152,13 @@ fetch_jql_list() {
     
     local jql_encoded
     jql_encoded=$(jq -rn --arg s "$jql" '$s|@uri')
-    local url="$JIRA_HOST/rest/api/${JIRA_API_VERSION}/search?jql=$jql_encoded&maxResults=$limit&fields=key,summary,project,status,labels,components,${epic_field}"
-    
+    local url
+    if [[ "$JIRA_API_VERSION" == "3" ]]; then
+        url="$JIRA_HOST/rest/api/3/search/jql?jql=$jql_encoded&maxResults=$limit&fields=key,summary,project,status,labels,components,${epic_field}"
+    else
+        url="$JIRA_HOST/rest/api/${JIRA_API_VERSION}/search?jql=$jql_encoded&maxResults=$limit&fields=key,summary,project,status,labels,components,${epic_field}"
+    fi
+
     local response
     if type execute_curl >/dev/null 2>&1; then
         response=$(execute_curl --request GET -H "Content-Type: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} "$url")

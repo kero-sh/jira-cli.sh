@@ -2301,9 +2301,19 @@ if [[ "$MULTI_STEP_USER_ACTIVITY" == "true" ]]; then
           '{user:{found:true,accountId:$accountId,username:$username,displayName:$displayName,email:$email}, jql:{created:{todo:$c_todo,in_progress:$c_prog,done:$c_done}, assigned:{todo:$a_todo,in_progress:$a_prog,done:$a_done}}}')
       else
         get_total_by_jql() {
-          local jql="$1"; local enc; enc=$(jq -rn --arg s "$jql" '$s|@uri');
-          local url="$JIRA_HOST/rest/api/${JIRA_API_VERSION}/search?jql=$enc&maxResults=0&fields=none";
-          local resp; resp=$(execute_curl --request GET -H "Content-Type: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} "$url"); printf '%s' "$resp" | jq -r '.total // 0'
+          local jql="$1"
+          local resp
+          if [[ "$JIRA_API_VERSION" == "3" ]]; then
+            local _payload
+            _payload=$(jq -n --arg jql "$jql" '{jql: $jql}')
+            resp=$(execute_curl --request POST -H "Content-Type: application/json" -H "Accept: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} --data "$_payload" "$JIRA_HOST/rest/api/3/search/approximate-count")
+            printf '%s' "$resp" | jq -r '.count // .total // .issueCount // 0'
+          else
+            local enc; enc=$(jq -rn --arg s "$jql" '$s|@uri')
+            local url="$JIRA_HOST/rest/api/${JIRA_API_VERSION}/search?jql=$enc&maxResults=0&fields=none"
+            resp=$(execute_curl --request GET -H "Content-Type: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} "$url")
+            printf '%s' "$resp" | jq -r '.total // 0'
+          fi
         }
 
         _c_todo=$(get_total_by_jql "$JQL_CREATED_TODO")
@@ -2319,7 +2329,12 @@ if [[ "$MULTI_STEP_USER_ACTIVITY" == "true" ]]; then
             local jql="$1"; local scope="$2"; local category="$3"; local enc; enc=$(jq -rn --arg s "$jql" '$s|@uri');
             local epic_field_name
             epic_field_name="${JIRA_EPIC_FIELD:-customfield_10014}"
-            local url="$JIRA_HOST/rest/api/${JIRA_API_VERSION}/search?jql=$enc&maxResults=$USER_ACTIVITY_LIMIT&fields=key,summary,project,status,labels,components,${epic_field_name}";
+            local url
+            if [[ "$JIRA_API_VERSION" == "3" ]]; then
+              url="$JIRA_HOST/rest/api/3/search/jql?jql=$enc&maxResults=$USER_ACTIVITY_LIMIT&fields=key,summary,project,status,labels,components,${epic_field_name}"
+            else
+              url="$JIRA_HOST/rest/api/${JIRA_API_VERSION}/search?jql=$enc&maxResults=$USER_ACTIVITY_LIMIT&fields=key,summary,project,status,labels,components,${epic_field_name}"
+            fi
             local resp; resp=$(execute_curl --request GET -H "Content-Type: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} "$url");
             printf '%s' "$resp" | jq --arg scope "$scope" --arg cat "$category" --arg epic "$epic_field_name" '
               (.issues // []) | map({
@@ -2406,9 +2421,19 @@ if [[ "$MULTI_STEP_USER_ACTIVITY" == "true" ]]; then
           '{user:{found:true,accountId:$accountId,username:$username,displayName:$displayName,email:$email}, jql:{created:$created,assigned:$assigned,resolved:$resolved,in_progress:$in_progress,not_started:$not_started,commented:$commented}}')
       else
         get_total_by_jql() {
-          local jql="$1"; local enc; enc=$(jq -rn --arg s "$jql" '$s|@uri');
-          local url="$JIRA_HOST/rest/api/${JIRA_API_VERSION}/search?jql=$enc&maxResults=0&fields=none";
-          local resp; resp=$(execute_curl --request GET -H "Content-Type: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} "$url"); printf '%s' "$resp" | jq -r '.total // 0'
+          local jql="$1"
+          local resp
+          if [[ "$JIRA_API_VERSION" == "3" ]]; then
+            local _payload
+            _payload=$(jq -n --arg jql "$jql" '{jql: $jql}')
+            resp=$(execute_curl --request POST -H "Content-Type: application/json" -H "Accept: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} --data "$_payload" "$JIRA_HOST/rest/api/3/search/approximate-count")
+            printf '%s' "$resp" | jq -r '.count // .total // .issueCount // 0'
+          else
+            local enc; enc=$(jq -rn --arg s "$jql" '$s|@uri')
+            local url="$JIRA_HOST/rest/api/${JIRA_API_VERSION}/search?jql=$enc&maxResults=0&fields=none"
+            resp=$(execute_curl --request GET -H "Content-Type: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} "$url")
+            printf '%s' "$resp" | jq -r '.total // 0'
+          fi
         }
         _tot_created=$(get_total_by_jql "$JQL_CREATED")
         _tot_assigned=$(get_total_by_jql "$JQL_ASSIGNED")
@@ -2419,9 +2444,19 @@ if [[ "$MULTI_STEP_USER_ACTIVITY" == "true" ]]; then
         # Comentados: escanear issues recientes
         SCAN_MAX="${COMMENT_SCAN_MAX:-${JIRA_ACTIVITY_COMMENT_SCAN_MAX:-100}}"; PAGE=50
         _jql_recent="$date_filter_updated ORDER BY updated DESC"; _processed=0; _commented=0; _startAt=0
+        _next_page_token=""
         while [[ $_processed -lt $SCAN_MAX ]]; do
           _enc=$(jq -rn --arg s "$_jql_recent" '$s|@uri')
-          _url="$JIRA_HOST/rest/api/${JIRA_API_VERSION}/search?jql=$_enc&startAt=$_startAt&maxResults=$PAGE&fields=key"
+          if [[ "$JIRA_API_VERSION" == "3" ]]; then
+            if [[ -z "$_next_page_token" ]]; then
+              _url="$JIRA_HOST/rest/api/3/search/jql?jql=$_enc&maxResults=$PAGE&fields=key"
+            else
+              _tok=$(jq -rn --arg s "$_next_page_token" '$s|@uri')
+              _url="$JIRA_HOST/rest/api/3/search/jql?jql=$_enc&maxResults=$PAGE&fields=key&nextPageToken=$_tok"
+            fi
+          else
+            _url="$JIRA_HOST/rest/api/${JIRA_API_VERSION}/search?jql=$_enc&startAt=$_startAt&maxResults=$PAGE&fields=key"
+          fi
           _resp=$(execute_curl --request GET -H "Content-Type: application/json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} "$_url")
           _count_keys=$(printf '%s' "$_resp" | jq -r '.issues | length'); [[ "$_count_keys" -eq 0 ]] && break
           while IFS= read -r _key; do
@@ -2435,7 +2470,14 @@ if [[ "$MULTI_STEP_USER_ACTIVITY" == "true" ]]; then
               if printf '%s' "$_c_resp" | jq -e --arg u "$_chosen_id" 'any(.comments[]?; (.author.accountId // "") == $u)' > /dev/null; then _commented=$(( _commented + 1 )); fi
             fi
           done < <(printf '%s' "$_resp" | jq -r '.issues[].key')
-          _startAt=$(( _startAt + PAGE ))
+          if [[ "$JIRA_API_VERSION" == "3" ]]; then
+            _is_last=$(printf '%s' "$_resp" | jq -r '.isLast // false')
+            _next_page_token=$(printf '%s' "$_resp" | jq -r '.nextPageToken // empty')
+            [[ "$_is_last" == "true" ]] && break
+            [[ -z "$_next_page_token" ]] && break
+          else
+            _startAt=$(( _startAt + PAGE ))
+          fi
         done
 
         EARLY_RESPONSE=$(jq -n \
@@ -2613,6 +2655,12 @@ elif [[ "$ENDPOINT" =~ ^/rest/ ]]; then
 else
   # Endpoint corto (p.ej. /user/search, /issue/ABC-123, /search?...)
   REQUEST_URL="$JIRA_HOST/rest/api/${JIRA_API_VERSION}$ENDPOINT"
+fi
+
+# Jira Cloud (API v3): /rest/api/3/search fue removido; usar /rest/api/3/search/jql
+# Ref: https://confluence.atlassian.com/jirakb/run-jql-search-query-using-jira-cloud-rest-api-1289424308.html
+if [[ "$JIRA_API_VERSION" == "3" ]] && [[ "$REQUEST_URL" == *"/rest/api/3/search?"* ]] && [[ "$REQUEST_URL" != *"/rest/api/3/search/jql?"* ]]; then
+  REQUEST_URL="${REQUEST_URL//\/rest\/api\/3\/search?/\/rest\/api\/3\/search\/jql?}"
 fi
 
 # Import de componentes: leer stdin, parsear y POST por cada componente
@@ -2836,89 +2884,96 @@ else
   fi
   
   # Manejar paginación para búsquedas
+  # API v3 (Cloud): /search sustituido por /search/jql; paginación con nextPageToken (no startAt)
   if [[ "$PAGINATE" == "true" ]] && [[ "$ENDPOINT" =~ ^/search\? ]]; then
-    # Extraer JQL codificado y otros parámetros del endpoint
     jql_param=""
     other_params=""
-    base_endpoint="/search"
-    
+    if [[ "$JIRA_API_VERSION" == "3" ]]; then
+      base_endpoint="/search/jql"
+    else
+      base_endpoint="/search"
+    fi
+
     # Separar jql de otros parámetros
     if [[ "$ENDPOINT" =~ jql=([^&]+) ]]; then
       jql_param="${BASH_REMATCH[1]}"
-      # Extraer otros parámetros (si existen), excluyendo startAt y maxResults que manejaremos nosotros
       if [[ "$ENDPOINT" =~ \&(.*)$ ]]; then
         temp_params="${BASH_REMATCH[1]}"
-        # Filtrar startAt y maxResults si existen
-        other_params=$(printf '%s' "$temp_params" | sed 's/[&?]startAt=[^&]*//g' | sed 's/[&?]maxResults=[^&]*//g' | sed 's/^&//')
+        other_params=$(printf '%s' "$temp_params" | sed 's/[&?]startAt=[^&]*//g' | sed 's/[&?]maxResults=[^&]*//g' | sed 's/[&?]nextPageToken=[^&]*//g' | sed 's/^&//')
         [[ -n "$other_params" ]] && other_params="&${other_params}"
       fi
     fi
-    
+
     if [[ -z "$jql_param" ]]; then
       error "No se pudo extraer JQL del endpoint para paginación"
       exit 1
     fi
-    
-    # Parámetros de paginación
+
     start_at=0
     max_results=100
     all_issues=()
     first_response=""
     total_results=0
-    
-    # Bucle de paginación
+    next_page_token=""
+
     while true; do
-      # Construir URL con paginación usando el JQL ya codificado
-      paginated_endpoint="${base_endpoint}?jql=${jql_param}&startAt=${start_at}&maxResults=${max_results}${other_params}"
+      if [[ "$JIRA_API_VERSION" == "3" ]]; then
+        if [[ -z "$next_page_token" ]]; then
+          paginated_endpoint="${base_endpoint}?jql=${jql_param}&maxResults=${max_results}${other_params}"
+        else
+          _tok=$(jq -rn --arg s "$next_page_token" '$s|@uri')
+          paginated_endpoint="${base_endpoint}?jql=${jql_param}&maxResults=${max_results}&nextPageToken=${_tok}${other_params}"
+        fi
+      else
+        paginated_endpoint="${base_endpoint}?jql=${jql_param}&startAt=${start_at}&maxResults=${max_results}${other_params}"
+      fi
       paginated_url="$JIRA_HOST/rest/api/${JIRA_API_VERSION}${paginated_endpoint}"
-      
-      # Ejecutar consulta
+
       page_response=$(execute_curl "${curl_args[@]}" "$paginated_url")
-      
-      # Verificar si hay error
+
       if ! printf '%s' "$page_response" | jq -e '.' >/dev/null 2>&1; then
         error "Error en la respuesta de la API"
         printf '%s' "$page_response" >&2
         exit 1
       fi
-      
-      # Guardar primera respuesta para metadatos
+
       if [[ -z "$first_response" ]]; then
         first_response="$page_response"
         total_results=$(printf '%s' "$page_response" | jq -r '.total // 0')
       fi
-      
-      # Extraer issues de esta página
+
       page_issues=$(printf '%s' "$page_response" | jq -c '.issues[]? // empty')
-      
+
       if [[ -z "$page_issues" ]]; then
         break
       fi
-      
-      # Acumular issues
+
       while IFS= read -r issue; do
         [[ -n "$issue" ]] && all_issues+=("$issue")
       done <<< "$page_issues"
-      
-      # Verificar si hay más páginas
+
       current_count=$(printf '%s' "$page_response" | jq -r '.issues | length')
-      current_start_at=$(printf '%s' "$page_response" | jq -r '.startAt // 0')
-      
-      if [[ "$current_count" -lt "$max_results" ]] || [[ $((current_start_at + current_count)) -ge "$total_results" ]]; then
-        break
+
+      if [[ "$JIRA_API_VERSION" == "3" ]]; then
+        _is_last=$(printf '%s' "$page_response" | jq -r '.isLast // false')
+        next_page_token=$(printf '%s' "$page_response" | jq -r '.nextPageToken // empty')
+        [[ "$_is_last" == "true" ]] && break
+        [[ -z "$next_page_token" ]] && break
+      else
+        current_start_at=$(printf '%s' "$page_response" | jq -r '.startAt // 0')
+        if [[ "$current_count" -lt "$max_results" ]] || [[ $((current_start_at + current_count)) -ge "$total_results" ]]; then
+          break
+        fi
+        start_at=$((start_at + max_results))
       fi
-      
-      start_at=$((start_at + max_results))
     done
-    
-    # Combinar todos los issues en una sola respuesta
+
     if [[ ${#all_issues[@]} -gt 0 ]]; then
-      # Usar archivo temporal para evitar "Argument list too long"
       issues_temp=$(mktemp)
       printf '%s\n' "${all_issues[@]}" | jq -s '.' > "$issues_temp"
       first_temp=$(mktemp)
       printf '%s' "$first_response" > "$first_temp"
-      RESPONSE=$(jq --slurpfile issues "$issues_temp" '.issues = $issues[0] | .startAt = 0 | .maxResults = ($issues[0] | length)' "$first_temp")
+      RESPONSE=$(jq --slurpfile issues "$issues_temp" '.issues = $issues[0] | .startAt = 0 | .maxResults = ($issues[0] | length) | del(.nextPageToken) | del(.isLast)' "$first_temp")
       rm -f "$issues_temp" "$first_temp"
     else
       RESPONSE="$first_response"
