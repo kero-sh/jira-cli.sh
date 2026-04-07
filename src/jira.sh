@@ -223,7 +223,9 @@ EJEMPLOS:
   jira issue ABC-123 --assign me              # Asignar a mi usuario
   jira issue ABC-123 --assign user@dom.com    # Asignar a usuario específico
   jira issue ABC-123 --unassign               # Dejar sin asignación
-  jira search 'project=ABC AND status=Open'
+  jira issue comment ABC-123 -m "Comentario"  # Agrega comentario
+  jira issue comment ABC-123 -m "@file.txt"   # Comentario desde archivo
+  echo "mensaje" | jira issue comment ABC-123 -m -  # Comentario desde pipe
   jira create --data '{"fields":{"project":{"key":"ABC"},"summary":"Nuevo ticket","issuetype":{"name":"Task"}}}'
   jira create --data ./payload.json
   jira create --data ./payload.json --priority High --assignee user1
@@ -338,6 +340,7 @@ show_help_issue() {
   cat << EOF
 Uso: jira issue [key] [opciones]
      jira issue comment [key] -m "mensaje" [opciones]
+     jira issue comment [key] -m "@archivo" [opciones]
      jira [key] --move PROJ   # Mover (clonar) issue a otro proyecto
      jira move [key] --to-project PROJ [opciones]
 
@@ -370,11 +373,12 @@ Ejemplos:
   jira issue ABC-123 --move PROJ2 # Clona ABC-123 en el proyecto PROJ2
   jira ABC-123 --move PROJ2      # Mismo efecto (atajo)
   jira move ABC-123 --to-project PROJ2 --components Frontend,Backend --yes
-  jira issue ABC-123 --transitions # Muestra transiciones disponibles
-  jira issue ABC-123 --transitions --to 611  # Ejecuta transición
-  jira issue ABC-123 --transition "Done"     # Cambia a estado Done (por nombre de estado)
   jira issue ABC-123 --assign me            # Asignar a mi usuario
+  jira issue ABC-123 --assign user@example.com # Asignar a usuario específico
+  jira issue ABC-123 --assign none          # Dejar sin asignación
+  jira issue ABC-123 --unassign             # Dejar sin asignación (alias)
   jira issue comment ABC-123 -m "Comentario aquí"  # Agrega comentario
+  jira issue comment ABC-123 -m "@mensaje.txt"  # Comentario desde archivo
   echo "mensaje" | jira issue comment ABC-123 -m -  # Comentario desde pipe
 EOF
 }
@@ -1784,6 +1788,9 @@ fi
 # Continuar con el parseo de argumentos restantes (solo para argumentos que no procesamos en el primer pase)
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    -m|--message)
+      shift 2
+      ;;
     GET|POST|PUT)
       if [[ "$USING_SIMPLIFIED_SYNTAX" == "true" ]]; then
         echo "Error: No puedes especificar método HTTP con sintaxis simplificada" >&2
@@ -1816,9 +1823,12 @@ while [[ $# -gt 0 ]]; do
       # Flag sin valor, ya procesado en el primer pase
       shift
       ;;
-    --data|--token|--host|--output|--csv-export|--transitions|--to|--transition|--assign|--unassign|--project|--summary|--description|--type|--assignee|--reporter|--priority|--epic|--link-issue|--template|--workflow|--from-date|--to-date|--lookback|--limit|--jira-host|--jira-token|--jira-email|--jira-api-token|--jira-api-version|--jira-auth|--jira-project|--comment-scan-max|-m|--message|--method|--field|--raw-field|--header|--input|--export|--import|--format|-f|-F|-H|--move|--components|--yes)
+    --data|--token|--host|--output|--csv-export|--transitions|--to|--transition|--assign|--unassign|--project|--summary|--description|--type|--assignee|--reporter|--priority|--epic|--link-issue|--template|--workflow|--from-date|--to-date|--lookback|--limit|--jira-host|--jira-token|--jira-email|--jira-api-token|--jira-api-version|--jira-auth|--jira-project|--comment-scan-max|--method|--field|--raw-field|--header|--input|--export|--import|--format|--move|--components|--yes)
       # Ya procesados en el primer pase, saltarlos. Solo shift 2 si la opción lleva valor (--format, --output, etc.)
-      if [[ "$1" =~ ^--(format|output|data|token|host|csv-export|to|transition|project|summary|description|type|assignee|reporter|priority|epic|link-issue|template|workflow|from-date|to-date|lookback|limit|jira-host|jira-token|jira-email|jira-api-token|jira-api-version|jira-auth|jira-project|comment-scan-max|message|method|field|raw-field|header|input|move|components)$ ]] && [[ $# -ge 2 && ! "$2" =~ ^- ]]; then
+      if [[ "$1" =~ ^--(format|output|data|token|host|csv-export|to|transition|project|summary|description|type|assignee|reporter|priority|epic|link-issue|template|workflow|from-date|to-date|lookback|limit|jira-host|jira-token|jira-email|jira-api-token|jira-api-version|jira-auth|jira-project|comment-scan-max|message|method|field|raw-field|header|input|export|import|move|components|yes)$ ]] && [[ $# -ge 2 && ! "$2" =~ ^- ]]; then
+        shift 2
+      elif [[ "$1" =~ ^-([mfFH])$ ]] || [[ "$1" == "-m" ]] || [[ "$1" == "--message" ]]; then
+        echo "DEBUG: Detected -m or --message, shifting 2" >&2
         shift 2
       else
         shift
@@ -2806,6 +2816,16 @@ else
         exit 1
       fi
       COMMENT_MESSAGE=$(cat)
+      # Eliminar nueva línea final si existe
+      COMMENT_MESSAGE="${COMMENT_MESSAGE%$'\n'}"
+    # Leer desde archivo si el mensaje comienza con "@"
+    elif [[ "$COMMENT_MESSAGE" == @* ]]; then
+      _file_path="${COMMENT_MESSAGE#@}"
+      if [[ ! -f "$_file_path" ]]; then
+        echo "Error: No existe el archivo '$_file_path'" >&2
+        exit 1
+      fi
+      COMMENT_MESSAGE=$(cat "$_file_path")
       # Eliminar nueva línea final si existe
       COMMENT_MESSAGE="${COMMENT_MESSAGE%$'\n'}"
     fi
