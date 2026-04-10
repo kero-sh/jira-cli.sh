@@ -65,6 +65,10 @@ CREATE_PRIORITY=""
 CREATE_EPIC=""
 CREATE_LINK_ISSUE=""
 CREATE_TEMPLATE=""
+# Flags para salida de payload
+CREATE_OUTPUT_FORMAT=""
+CREATE_OUTPUT_FILE=""
+CREATE_ONLY_MODE=""
 
 # Subcommands/state for 'user'
 USER_MODE=""
@@ -407,35 +411,75 @@ EOF
 
 # Help for 'jira create'
 show_help_create() {
-  cat << EOF
-Uso: jira create [opciones]
+  # Load color functions from helpers
+  if [[ -f "$DIR/../vendor/helpers.sh" ]]; then
+    # shellcheck source=/dev/null
+    source "$DIR/../vendor/helpers.sh"
+  fi
 
-Descripción:
-  Crea un nuevo issue en Jira.
-
-Opciones:
-  --data '{json}'    Datos JSON para crear (también acepta ruta a archivo)
-  --project KEY      Proyecto/tablero donde se crea el issue (obligatorio si no usas --data)
-  --summary TEXT     Resumen/título del issue
-  --description TXT  Descripción del issue
-  --type NAME        Tipo de issue (ej: Task, Bug)
-  --assignee NAME    Usuario asignado (username)
-  --reporter NAME    Usuario reportero (username)
-  --priority NAME    Prioridad por nombre (ej: High)
-  --epic KEY         Epic Link (customfield_10100)
-  --link-issue KEY   Vincula a otro issue
-  --template FILE    Plantilla JSON base
-  -h, --help         Muestra esta ayuda
-
-Ejemplos:
-  jira create --data '{"fields":{"project":{"key":"ABC"},"summary":"Test","issuetype":{"name":"Task"}}}'
-  jira create --data ./payload.json
-  jira create --project ABC --summary "Title" --type Task
-  jira api /search?jql=project=ABC
-  jira api /issue --method POST --field summary='New Issue' --field project='ABC'
-  jira api /issue/ABC-123 --method PUT --field summary='Updated Title'
-  jira api /search --raw-field jql='status=Open' --header 'Accept: application/json'
-EOF
+  # Title
+  title "jira create"
+  paragraph "Create a new Jira issue with various output options."
+  
+  # Usage
+  subtitle "Usage"
+  paragraph "  jira create $(text_secondary "[OPTIONS]")"
+  
+  # Options
+  subtitle "Options"
+  {
+  parse_arg "--data" "'{json}' or FILE" "" "Uses JIRA_DEFAULT_DATA if not specified."
+  parse_arg "--project" "KEY" "" "Uses JIRA_DEFAULT_PROJECT first, then JIRA_PROJECT."
+  parse_arg "--summary" "TEXT" "" "Issue title/summary."
+  parse_arg "--description" "TEXT" "" "Issue description."
+  parse_arg "--type" "NAME" "Task" "Issue type (e.g., Task, Bug, Story)."
+  parse_arg "--assignee" "USERNAME" "" "Assign issue to user."
+  parse_arg "--reporter" "USERNAME" "" "Set issue reporter."
+  parse_arg "--priority" "NAME" "" "Issue priority (e.g., High, Medium, Low)."
+  parse_arg "--epic" "KEY" "" "Link to epic (customfield_10100)."
+  parse_arg "--link-issue" "KEY" "" "Create 'Relates to' link to another issue."
+  parse_arg "--template" "FILE" "" "Base JSON template file."
+  } | toUsage 4
+  echo
+  
+  # Output options
+  subtitle "Output Options"
+  {
+  parse_arg "-O|--output" "FORMAT [FILE]" "" "Save payload to file (json, yaml, text, csv)."  
+  parse_arg "--only-*" "" "Show payload in stdout without creating issue in any format json, yaml, text, csv."
+  parse_arg "--dry-run" "" "" "Print curl command instead of executing."
+  parse_arg "-h, --help" "" "" "Show this help."
+  } | toUsage 4
+  echo
+  
+  # Examples
+  subtitle "Examples"
+  {
+  parse_arg "Basic issue creation" "" "" "jira create --project ABC --summary \"Fix login bug\" --type Bug"
+  parse_arg "With environment variables" "" "" "JIRA_DEFAULT_PROJECT=ABC jira create --summary \"New feature\" --type Story"
+  parse_arg "Using JSON data" "" "" "jira create --data '{\"fields\":{\"project\":{\"key\":\"ABC\"},\"summary\":\"Test\",\"issuetype\":{\"name\":\"Task\"}}}'"
+  parse_arg "Save payload without creating" "" "" "jira create --only-json --project ABC --summary \"Preview issue\""
+  parse_arg "Save to file" "" "" "jira create --output json /tmp/payload.json --project ABC --summary \"Issue\""
+  parse_arg "Using default data" "" "" "JIRA_DEFAULT_DATA=./template.json jira create --summary \"Custom title\""
+  } | toUsage 4
+  
+  # Environment variables
+  subtitle "Environment Variables"
+  {
+  parse_arg "JIRA_DEFAULT_PROJECT" "" "" "Default project key (highest priority)"
+  parse_arg "JIRA_PROJECT" "" "" "Default project key (fallback)"
+  parse_arg "JIRA_DEFAULT_DATA" "" "" "Default JSON data/template"
+  parse_arg "JIRA_HOST" "" "" "Jira instance URL"
+  parse_arg "JIRA_TOKEN" "" "" "Authentication token"
+  } | toUsage 4
+  
+  # Notes
+  subtitle "Notes"
+  {
+  parse_arg "Priority order" "" "" "--project > JIRA_DEFAULT_PROJECT > JIRA_PROJECT."
+  parse_arg "Data priority" "" "" "--data > JIRA_DEFAULT_DATA > --template."
+  parse_arg "CSV format exports" "" "" "[project, summary, type]."
+  } | toUsage 4
 }
 
 # Help for 'jira profile'
@@ -1348,6 +1392,7 @@ for ((i=0; i<${#temp_args[@]}; i++)); do
       ((i++))
       ;;
     --output)
+      # Este es para el formato general de salida (json, csv, table, etc)
       OUTPUT="${temp_args[i+1]}"
       ((i++))
       ;;
@@ -1472,6 +1517,38 @@ for ((i=0; i<${#temp_args[@]}; i++)); do
       COMMENT_MESSAGE="${temp_args[i+1]}"; ((i++)) ;;
     --dry-run)
       DRY_RUN=true ;;
+    -O)
+      # Alias para --output de payload de create
+      if [[ $((i+1)) -lt ${#temp_args[@]} && -n "${temp_args[i+1]}" && ! "${temp_args[i+1]}" =~ ^- ]]; then
+        CREATE_OUTPUT_FORMAT="${temp_args[i+1]}"
+        ((i++))
+        # Verificar si hay archivo como siguiente argumento
+        if [[ $((i+1)) -lt ${#temp_args[@]} && -n "${temp_args[i+1]}" && ! "${temp_args[i+1]}" =~ ^- ]]; then
+          CREATE_OUTPUT_FILE="${temp_args[i+1]}"
+          ((i++))
+        fi
+      fi
+      ;;
+    --output)
+      # Formato y archivo opcional para payload de create
+      if [[ $((i+1)) -lt ${#temp_args[@]} && -n "${temp_args[i+1]}" && ! "${temp_args[i+1]}" =~ ^- ]]; then
+        CREATE_OUTPUT_FORMAT="${temp_args[i+1]}"
+        ((i++))
+        # Verificar si hay archivo como siguiente argumento
+        if [[ $((i+1)) -lt ${#temp_args[@]} && -n "${temp_args[i+1]}" && ! "${temp_args[i+1]}" =~ ^- ]]; then
+          CREATE_OUTPUT_FILE="${temp_args[i+1]}"
+          ((i++))
+        fi
+      fi
+      ;;
+    --only-json)
+      CREATE_ONLY_MODE="json" ;;
+    --only-yaml)
+      CREATE_ONLY_MODE="yaml" ;;
+    --only-text)
+      CREATE_ONLY_MODE="text" ;;
+    --only-csv)
+      CREATE_ONLY_MODE="csv" ;;
     --paginate)
       PAGINATE=true ;;
     # Opciones para 'project components' export/import
@@ -1819,14 +1896,23 @@ while [[ $# -gt 0 ]]; do
       # Flag sin valor
       shift
       ;;
+    -O)
+      # Flag con valor (alias de --output para payload)
+      shift 2
+      ;;
     --paginate)
       # Flag sin valor, ya procesado en el primer pase
       shift
       ;;
-    --data|--token|--host|--output|--csv-export|--transitions|--to|--transition|--assign|--unassign|--project|--summary|--description|--type|--assignee|--reporter|--priority|--epic|--link-issue|--template|--workflow|--from-date|--to-date|--lookback|--limit|--jira-host|--jira-token|--jira-email|--jira-api-token|--jira-api-version|--jira-auth|--jira-project|--comment-scan-max|--method|--field|--raw-field|--header|--input|--export|--import|--format|--move|--components|--yes)
+    --data|--token|--host|--output|--csv-export|--transitions|--to|--transition|--assign|--unassign|--project|--summary|--description|--type|--assignee|--reporter|--priority|--epic|--link-issue|--template|--workflow|--from-date|--to-date|--lookback|--limit|--jira-host|--jira-token|--jira-email|--jira-api-token|--jira-api-version|--jira-auth|--jira-project|--comment-scan-max|--method|--field|--raw-field|--header|--input|--export|--import|--format|--move|--components|--yes|--only-json|--only-yaml|--only-text|--only-csv|-O)
       # Ya procesados en el primer pase, saltarlos. Solo shift 2 si la opción lleva valor (--format, --output, etc.)
       if [[ "$1" =~ ^--(format|output|data|token|host|csv-export|to|transition|project|summary|description|type|assignee|reporter|priority|epic|link-issue|template|workflow|from-date|to-date|lookback|limit|jira-host|jira-token|jira-email|jira-api-token|jira-api-version|jira-auth|jira-project|comment-scan-max|message|method|field|raw-field|header|input|export|import|move|components|yes)$ ]] && [[ $# -ge 2 && ! "$2" =~ ^- ]]; then
-        shift 2
+        # Para --output, verificar si hay un tercer argumento que es el archivo
+        if [[ "$1" == "--output" ]] && [[ $# -ge 3 && ! "$3" =~ ^- ]]; then
+          shift 3
+        else
+          shift 2
+        fi
       elif [[ "$1" =~ ^-([mfFH])$ ]] || [[ "$1" == "-m" ]] || [[ "$1" == "--message" ]]; then
         echo "DEBUG: Detected -m or --message, shifting 2" >&2
         shift 2
@@ -2590,7 +2676,7 @@ prepare_create_payload() {
   local base_file
   base_file=$(mktemp)
 
-  # Determinar base: --data (archivo o inline) > --template > esqueleto
+  # Determinar base: --data (archivo o inline) > JIRA_DEFAULT_DATA > --template > esqueleto
   if [[ -n "$DATA" ]]; then
     if [[ -f "$DATA" ]]; then
       cat "$DATA" > "$base_file"
@@ -2598,6 +2684,14 @@ prepare_create_payload() {
       cat "${DATA#@}" > "$base_file"
     else
       printf '%s' "$DATA" > "$base_file"
+    fi
+  elif [[ -n "$JIRA_DEFAULT_DATA" ]]; then
+    if [[ -f "$JIRA_DEFAULT_DATA" ]]; then
+      cat "$JIRA_DEFAULT_DATA" > "$base_file"
+    elif [[ "$JIRA_DEFAULT_DATA" == @* ]] && [[ -f "${JIRA_DEFAULT_DATA#@}" ]]; then
+      cat "${JIRA_DEFAULT_DATA#@}" > "$base_file"
+    else
+      printf '%s' "$JIRA_DEFAULT_DATA" > "$base_file"
     fi
   elif [[ -n "$CREATE_TEMPLATE" && -f "$CREATE_TEMPLATE" ]]; then
     cat "$CREATE_TEMPLATE" > "$base_file"
@@ -2608,10 +2702,11 @@ prepare_create_payload() {
   local final_file
   final_file=$(mktemp)
 
-  # Proyecto: --project tiene prioridad absoluta; si se pasó, no usar JIRA_PROJECT ni el base.
+  # Proyecto: --project tiene prioridad absoluta; si se pasó, no usar JIRA_DEFAULT_PROJECT ni JIRA_PROJECT ni el base.
   # Asignar .fields.project como objeto completo.
   jq \
     --arg p_flag "$CREATE_PROJECT" \
+    --arg p_default "$JIRA_DEFAULT_PROJECT" \
     --arg p_env "$JIRA_PROJECT" \
     --arg s "$CREATE_SUMMARY" \
     --arg d "$CREATE_DESCRIPTION" \
@@ -2626,6 +2721,7 @@ prepare_create_payload() {
     . as $o
     | .fields = (.fields // {})
     | (if $p_flag != "" then .fields.project = { key: ($p_flag | ascii_upcase) }
+       elif ((.fields.project.key // "") == "") and ($p_default != "") then .fields.project = { key: ($p_default | ascii_upcase) }
        elif ((.fields.project.key // "") == "") and ($p_env != "") then .fields.project = { key: ($p_env | ascii_upcase) }
        else . end)
     | (if $s   != "" then .fields.summary     = $s else . end)
@@ -2798,6 +2894,49 @@ else
         exit 1
       fi
     fi
+    
+    # Manejar flags de salida
+    if [[ -n "$CREATE_OUTPUT_FORMAT" ]] || [[ -n "$CREATE_ONLY_MODE" ]]; then
+      format="${CREATE_OUTPUT_FORMAT:-$CREATE_ONLY_MODE}"
+      output_data=""
+      
+      case "$format" in
+        json)
+          output_data=$(jq '.' "$FINAL_DATA_FILE")
+          ;;
+        yaml)
+          if command -v yq &> /dev/null; then
+            output_data=$(yq -o yaml "$FINAL_DATA_FILE")
+          else
+            # Fallback a JSON si yq no está disponible
+            output_data=$(jq '.' "$FINAL_DATA_FILE")
+            echo "# Warning: yq not found, showing JSON instead" >&2
+          fi
+          ;;
+        text)
+          output_data=$(jq -r '.' "$FINAL_DATA_FILE")
+          ;;
+        csv)
+          output_data=$(jq '[.fields.project.key, .fields.summary, .fields.issuetype.name] | @csv' "$FINAL_DATA_FILE")
+          ;;
+        *)
+          error "Formato no soportado: $format. Usa json, yaml, text, o csv." >&2
+          rm -f "$FINAL_DATA_FILE"
+          exit 1
+          ;;
+      esac
+      
+      if [[ -n "$CREATE_OUTPUT_FILE" ]]; then
+        printf '%s' "$output_data" > "$CREATE_OUTPUT_FILE"
+        echo "Payload guardado en: $CREATE_OUTPUT_FILE"
+      else
+        printf '%s' "$output_data"
+      fi
+      
+      rm -f "$FINAL_DATA_FILE"
+      exit 0
+    fi
+    
     curl_args+=(--data @"$FINAL_DATA_FILE")
   elif [[ "$ISSUE_SUBCOMMAND" == "comment" && "$METHOD" == "POST" ]]; then
     # Construir payload para comentario
