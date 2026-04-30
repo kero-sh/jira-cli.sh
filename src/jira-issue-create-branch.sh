@@ -349,45 +349,53 @@ build_branch_name() {
     local key="$2"
     local summary="$3"
     local max_len=63
-    
+
     local base_prefix="$prefix/$key"
     local base_prefix_with_dash="$base_prefix-"
-    local allowed_slug_len=$((max_len - ${#base_prefix_with_dash}))
     local slug=$(generate_branch_slug "$summary")
     local branch_name=""
-    
-    # If there's no space for the slug, only use the prefix and key
-    if (( allowed_slug_len <= 0 )); then
-        branch_name="$base_prefix"
-    else
-        # Truncate the slug to available space
-        slug="${slug:0:allowed_slug_len}"
-        # Remove trailing hyphens after truncation
-        slug="${slug%-}"
-        
-        # If the slug is empty, use a default value
-        if [ -z "$slug" ]; then
-            slug="no-description"
+
+    # If slug is empty, use a default value
+    if [ -z "$slug" ]; then
+        slug="no-description"
+    fi
+
+    branch_name="$base_prefix-$slug"
+
+    # If branch name exceeds limit, truncate by removing last 2 words
+    while (( ${#branch_name} > max_len )); do
+        # Split slug into words (by hyphens)
+        local words=()
+        IFS='-' read -ra words <<< "$slug"
+
+        # If we have less than 3 words, truncate by character as fallback
+        if (( ${#words[@]} < 3 )); then
+            local allowed_slug_len=$((max_len - ${#base_prefix_with_dash}))
             slug="${slug:0:allowed_slug_len}"
             slug="${slug%-}"
             [ -z "$slug" ] && slug="x"
+            branch_name="$base_prefix-$slug"
+            break
         fi
-        
-        branch_name="$base_prefix-$slug"
-    fi
-    
-    # Final verification: ensure it doesn't exceed the limit
-    if (( ${#branch_name} > max_len )); then
-        branch_name="${branch_name:0:max_len}"
-        # Clean unwanted trailing characters
-        branch_name="${branch_name%-}"
-        branch_name="${branch_name%/}"
-        # If empty (very unlikely), use only the prefix
-        if [ -z "$branch_name" ]; then
-            branch_name="$prefix"
-            branch_name="${branch_name:0:max_len}"
+
+        # Remove last 2 words
+        local new_word_count=$((${#words[@]} - 2))
+        slug=""
+        for (( i=0; i<new_word_count; i++ )); do
+            if [ -n "$slug" ]; then
+                slug="${slug}-${words[$i]}"
+            else
+                slug="${words[$i]}"
+            fi
+        done
+
+        # Rebuild branch name
+        if [ -z "$slug" ]; then
+            branch_name="$base_prefix"
+        else
+            branch_name="$base_prefix-$slug"
         fi
-    fi
+    done
     
     # Final sanitization: remove any invalid characters using pure bash
     local clean_name=""
