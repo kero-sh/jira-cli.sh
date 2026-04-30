@@ -13,6 +13,7 @@ usage() {
 Usage: $(basename "$0") [options] <issue-key>
 
 Options:
+    -N                       Dry-run: only print the branch name without creating it
     -m                       Rename the current branch instead of creating a new one
     --summary <title>        Branch title (sanitized)
     -t <title>               Alias for --summary
@@ -27,6 +28,7 @@ Examples:
     $(basename "$0") --summary "My new feature" PROJ-123
     $(basename "$0") --prefix=hotfix --summary="Critical fix" PROJ-123
     $(basename "$0") -m --prefix feature PROJ-123
+    $(basename "$0") -N PROJ-123  # Only print branch name
 
 Notes:
     - If --summary/-t is not specified, the ticket title will be used.
@@ -60,6 +62,7 @@ confirm() {
 
 parse_arguments() {
     RENAME_MODE=false
+    DRY_RUN=false
     ISSUE_KEY=""
     BRANCH_SUMMARY=""
     BRANCH_PREFIX=""
@@ -67,6 +70,10 @@ parse_arguments() {
 
     while [[ $# -gt 0 ]]; do
         case $1 in
+            -N)
+                DRY_RUN=true
+                shift
+                ;;
             -m)
                 RENAME_MODE=true
                 shift
@@ -124,7 +131,9 @@ fetch_jira_issue() {
     local issue_key="$1"
     local issue_json=""
 
-    info "Retrieving issue $issue_key from JIRA..."
+    if [ "$DRY_RUN" = false ]; then
+        info "Retrieving issue $issue_key from JIRA..."
+    fi
     issue_json=$(jira issue-for-branch "$issue_key")
 
     if [ -z "$issue_json" ] || [ "$issue_json" = "null" ]; then
@@ -135,7 +144,9 @@ fetch_jira_issue() {
     # Sanitize JSON from control characters that break jq
     issue_json=$(printf '%s' "$issue_json" | tr -d '\000-\010\b\013\014\016-\037\177')
 
-    info "Processing issue data..."
+    if [ "$DRY_RUN" = false ]; then
+        info "Processing issue data..."
+    fi
     local flat_issue
     flat_issue=$(echo "$issue_json" | jq -r --arg key "$issue_key" '{
         key: $key,
@@ -181,7 +192,7 @@ parse_issue_data() {
     fi
 
     # Warn if the ticket is closed (has a non-empty resolution)
-    if [ -n "$issue_resolution" ] && [ "$issue_resolution" != "null" ]; then
+    if [ "$DRY_RUN" = false ] && [ -n "$issue_resolution" ] && [ "$issue_resolution" != "null" ]; then
         warning "Ticket $issue_key is closed (resolution: $issue_resolution, status: $issue_status)"
     fi
 }
@@ -597,11 +608,6 @@ create_branch() {
 main() {
     parse_arguments "$@"
 
-    info "Fetching latest changes from remote..."
-    if ! git fetch --prune origin; then
-        warning "Failed to fetch from remote 'origin'. Proceeding with local refs."
-    fi
-
     local issue=""
     local issue_key="$ISSUE_KEY"
     local issue_summary=""
@@ -626,6 +632,16 @@ main() {
         branch_prefix=$(determine_branch_prefix "$issue_type" "$issue_priority")
     fi
     branch_name=$(build_branch_name "$branch_prefix" "$issue_key" "$issue_summary")
+
+    if [ "$DRY_RUN" = true ]; then
+        echo "$branch_name"
+        exit 0
+    fi
+
+    info "Fetching latest changes from remote..."
+    if ! git fetch --prune origin; then
+        warning "Failed to fetch from remote 'origin'. Proceeding with local refs."
+    fi
 
     if [ "$RENAME_MODE" = true ]; then
         rename_branch "$branch_name"
