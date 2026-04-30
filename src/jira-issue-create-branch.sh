@@ -14,6 +14,7 @@ Usage: $(basename "$0") [options] <issue-key>
 
 Options:
     -N                       Dry-run: only print the branch name without creating it
+    -Q                       Quick mode: create branch without cleanup or fetch
     -m                       Rename the current branch instead of creating a new one
     --summary <title>        Branch title (sanitized)
     -t <title>               Alias for --summary
@@ -29,6 +30,7 @@ Examples:
     $(basename "$0") --prefix=hotfix --summary="Critical fix" PROJ-123
     $(basename "$0") -m --prefix feature PROJ-123
     $(basename "$0") -N PROJ-123  # Only print branch name
+    $(basename "$0") -Q PROJ-123  # Quick create without cleanup/fetch
 
 Notes:
     - If --summary/-t is not specified, the ticket title will be used.
@@ -63,6 +65,7 @@ confirm() {
 parse_arguments() {
     RENAME_MODE=false
     DRY_RUN=false
+    QUICK_MODE=false
     ISSUE_KEY=""
     BRANCH_SUMMARY=""
     BRANCH_PREFIX=""
@@ -72,6 +75,10 @@ parse_arguments() {
         case $1 in
             -N)
                 DRY_RUN=true
+                shift
+                ;;
+            -Q)
+                QUICK_MODE=true
                 shift
                 ;;
             -m)
@@ -643,6 +650,11 @@ main() {
 
     if [ "$DRY_RUN" = true ]; then
         echo "$branch_name"
+        exit 0
+    fi
+
+    if [ "$QUICK_MODE" = true ]; then
+        git checkout -b "$branch_name"
         exit 0
     fi
 
