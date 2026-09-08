@@ -50,6 +50,7 @@ echo "Testing main jira command:"
 test_help "jira --help" "bash $SRC_DIR/jira.sh --help"
 test_help "jira -h" "bash $SRC_DIR/jira.sh -h"
 test_help "jira help" "bash $SRC_DIR/jira.sh help"
+test_help "jira (no args / a secas)" "bash $SRC_DIR/jira.sh"
 echo ""
 
 # Test jira resources with help
@@ -129,6 +130,7 @@ if [ -d "$BIN_DIR" ]; then
     if [ -x "$BIN_DIR/jira" ]; then
         test_help "bin/jira --help" "$BIN_DIR/jira --help"
         test_help "bin/jira -h" "$BIN_DIR/jira -h"
+        test_help "bin/jira (no args / a secas)" "$BIN_DIR/jira"
     fi
     
     if [ -x "$BIN_DIR/jira-create-issue" ]; then

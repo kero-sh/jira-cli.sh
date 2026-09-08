@@ -144,143 +144,115 @@ execute_curl() {
   "${curl_cmd[@]}"
 }
 
-# Function to display help
+# Function to display help (Laravel Artisan style)
 show_help() {
-  cat << EOF
-JIRA API Client - Script para interactuar con la API de Jira
+  local version=""
+  if command -v jira_read_installed_version >/dev/null 2>&1; then
+    version="$(jira_read_installed_version)"
+  fi
+  [[ -z "$version" ]] && version="1.11.0"
 
-SINTAXIS:
-  Sintaxis tradicional:
-    jira [GET|POST|PUT] /endpoint [opciones]
+  local use_color=false
+  # Detect color support (Artisan / Symfony Console style)
+  if [[ -n "${CLICOLOR_FORCE:-}" && "${CLICOLOR_FORCE}" != "0" ]]; then
+    use_color=true
+  elif [[ -n "${NO_COLOR:-}" || "${TERM:-}" == "dumb" ]]; then
+    use_color=false
+  elif [[ -t 1 ]] || (command -v may_color >/dev/null 2>&1 && may_color); then
+    use_color=true
+  fi
 
-  Sintaxis simplificada:
-    jira <recurso> [identificador] [opciones]
+  local c_reset="" c_bold="" c_green="" c_yellow=""
+  if [[ "$use_color" == "true" ]]; then
+    c_reset=$'\033[0m'
+    c_bold=$'\033[1m'
+    c_green=$'\033[32m'
+    c_yellow=$'\033[33m'
+  fi
 
-RECURSOS DISPONIBLES:
-  project [id]       - Obtiene proyecto(s). Sin ID lista todos
-  project components <project> - Lista los componentes de un proyecto
-  project statuses <project>   - Obtiene workflows/estados por tipo de issue en un proyecto
-  project <key> --workflow [issuetype] - Muestra workflow y transiciones para un tipo de issue
-  issue [key]        - Obtiene issue(s). Sin key lista los asignados
-                       Con --transitions muestra transiciones disponibles
-                       Con --assign/--unassign gestiona la asignación del issue
-                       Con --move PROJ clona el issue en otro proyecto (mover entre tableros)
-  move [key]         - Atajo: jira move KEY --to-project PROJ (equivale a issue KEY --move PROJ)
-  issue-for-branch [key] - Obtiene datos de un issue para crear una rama (campos limitados)
-  open <key>         - Abre el issue en el navegador (usa \$JIRA_HOST/browse/<key>)
-  search [jql]       - Busca con JQL. Sin JQL busca asignados a ti
-  create             - Crea un issue (usa --data)
-  priority           - Lista todas las prioridades
-  status             - Lista todos los estados
-  workflow           - Lista todos los workflows
-  user [username]    - Busca usuario(s)
-  user get <term>    - Obtiene el perfil completo del usuario
-  user search <term> - Busca usuarios por texto/email/username
-  profile            - Obtiene información del perfil del usuario actual
-  api <endpoint>     - Realiza peticiones HTTP directas a la API de Jira
-  issuetype          - Lista todos los tipos de issue
-  field              - Lista todos los campos
-  resolution         - Lista todas las resoluciones
-  component <id>     - Obtiene componente específico (requiere ID)
-  version <id>       - Obtiene versión específica (requiere ID)
+  echo -e "${c_green}${c_bold}Jira CLI${c_reset} ${c_yellow}${version}${c_reset}"
+  echo
+  echo -e "${c_yellow}Usage:${c_reset}"
+  echo -e "  command [options] [arguments]"
+  echo -e "  jira <command> [options] [arguments]"
+  echo -e "  jira <key> [options]"
+  echo
+  echo -e "${c_yellow}Options:${c_reset}"
+  printf "  %b%-24s%b %s\n" "${c_green}" "-h, --help" "${c_reset}" "Muestra la ayuda de un comando (o esta pantalla)"
+  printf "  %b%-24s%b %s\n" "${c_green}" "-V, --version" "${c_reset}" "Muestra la versión instalada de jira-cli"
+  printf "  %b%-24s%b %s\n" "${c_green}" "    --dry-run" "${c_reset}" "Imprime la llamada HTTP (curl) sin ejecutarla"
+  printf "  %b%-24s%b %s\n" "${c_green}" "    --output=FORMAT" "${c_reset}" "Formato: json, table, csv, yaml, md [default: json]"
+  printf "  %b%-24s%b %s\n" "${c_green}" "    --host=HOST" "${c_reset}" "URL de la instancia Jira (o variable JIRA_HOST)"
+  printf "  %b%-24s%b %s\n" "${c_green}" "    --token=TOKEN" "${c_reset}" "Token de autenticación (o variable JIRA_TOKEN)"
+  printf "  %b%-24s%b %s\n" "${c_green}" "    --paginate" "${c_reset}" "Recorre todas las páginas de resultados (search)"
+  echo
+  echo -e "${c_yellow}Available commands:${c_reset}"
+  printf "  %b%-24s%b %s\n" "${c_green}" "api" "${c_reset}" "Peticiones HTTP directas a la API de Jira (estilo glab api)"
+  printf "  %b%-24s%b %s\n" "${c_green}" "create" "${c_reset}" "Crea un nuevo issue (flags interactivos, archivo o --data)"
+  printf "  %b%-24s%b %s\n" "${c_green}" "edit" "${c_reset}" "Edita campos de un issue: summary, desc, etc. (alias: update)"
+  printf "  %b%-24s%b %s\n" "${c_green}" "help" "${c_reset}" "Muestra la ayuda detallada para un comando"
+  printf "  %b%-24s%b %s\n" "${c_green}" "move" "${c_reset}" "Mueve o clona un issue hacia otro proyecto/tablero"
+  printf "  %b%-24s%b %s\n" "${c_green}" "open" "${c_reset}" "Abre el issue especificado en el navegador web"
+  printf "  %b%-24s%b %s\n" "${c_green}" "profile" "${c_reset}" "Muestra la información del usuario autenticado (/myself)"
+  printf "  %b%-24s%b %s\n" "${c_green}" "search" "${c_reset}" "Busca issues con JQL (sin argumentos busca asignados)"
+  printf "  %b%-24s%b %s\n" "${c_green}" "self-update" "${c_reset}" "Actualiza jira-cli a la última versión disponible"
 
-OPCIONES:
-  --data '{json}'    - Datos JSON para POST/PUT
-                       También acepta ruta a archivo JSON (leerá el archivo)
-  --token TOKEN      - Token de autenticación (o usar \$JIRA_TOKEN)
-  --host HOST        - URL de Jira (o usar \$JIRA_HOST)
-  --output FORMAT    - Formato de salida: json, csv, table, yaml, md
-  --csv-export TYPE  - Para search+csv: csv de Jira Cloud (all|current)
-  --paginate         - Para search: recorre todas las páginas de resultados automáticamente
-  --transitions      - Para issue: muestra transiciones disponibles; con --to ID ejecuta transición
-  --to ID            - ID de transición a aplicar cuando se usa --transitions
-  --transition SPEC  - Para issue: aplica transición por ID, nombre de transición o nombre de estado destino
-  --assign [me|email|user|none] - Asigna el issue a un usuario (me=ti mismo, none=sin asignación)
-  --unassign         - Alias para --assign none (deja el issue sin asignación)
-  --move PROJ        - Para issue: clona el issue en el proyecto PROJ (mover entre tableros)
-  --components A,B   - Con --move: lista de componentes destino (sobrescribe los del origen)
-  --yes              - Con --move: no preguntar (tipo de issue, crear componentes)
-  --shell SHELL      - Genera script de autocompletado: bash, zsh
-  --dry-run          - Imprime el comando curl en lugar de ejecutarlo
-  --help             - Muestra esta ayuda
+  echo -e " ${c_yellow}agile${c_reset}"
+  printf "  %b%-24s%b %s\n" "${c_green}" "board list" "${c_reset}" "Lista tableros ágiles Scrum/Kanban disponibles"
+  printf "  %b%-24s%b %s\n" "${c_green}" "sprint current" "${c_reset}" "Muestra el sprint activo actual del proyecto"
+  printf "  %b%-24s%b %s\n" "${c_green}" "sprint list" "${c_reset}" "Lista todos los sprints de un tablero"
+  printf "  %b%-24s%b %s\n" "${c_green}" "sprint issues" "${c_reset}" "Lista los issues asociados a un sprint"
+  printf "  %b%-24s%b %s\n" "${c_green}" "sprint add" "${c_reset}" "Agrega un issue específico a un sprint"
 
-PARA OPCIÓN ESPECÍFICAS DE CADA SUBCOMANDO: usa 'jira <subcomando> --help'
+  echo -e " ${c_yellow}attach${c_reset}"
+  printf "  %b%-24s%b %s\n" "${c_green}" "attach" "${c_reset}" "Adjunta archivos o evidencias a un issue"
+  printf "  %b%-24s%b %s\n" "${c_green}" "attach list" "${c_reset}" "Lista los archivos adjuntos de un issue"
+  printf "  %b%-24s%b %s\n" "${c_green}" "attach delete" "${c_reset}" "Elimina un archivo adjunto por su ID"
 
-VARIABLES DE ENTORNO:
-  --jira-host HOST    - URL base de Jira (default: $JIRA_HOST)
-  --jira-token TOKEN - Token OAuth Bearer o Basic Auth pre-codificado en base64 (default: $JIRA_TOKEN)
-  --jira-user USER   - Usuario para Basic Auth (default: $JIRA_USER)
-  --jira-password PASS - Password para Basic Auth (default: $JIRA_PASSWORD)
-  --jira-email EMAIL - Email de tu cuenta para Basic Auth (default: $JIRA_EMAIL)
-  --jira-api-token TOKEN - API token de Atlassian para Basic Auth (default: $JIRA_API_TOKEN)
-  --jira-api-version NUM - Versión API: 3 (Cloud) o 2 (Server/DC) (default: $JIRA_API_VERSION)
-  --jira-auth TYPE   - Tipo autenticación: basic|bearer (default: $JIRA_AUTH o autodetecta)
-  --jira-project KEY - Clave de proyecto por defecto para 'create' (default: $JIRA_PROJECT)
+  echo -e " ${c_yellow}branch${c_reset}"
+  printf "  %b%-24s%b %s\n" "${c_green}" "branch" "${c_reset}" "Crea una rama Git normalizada basada en el issue"
+  printf "  %b%-24s%b %s\n" "${c_green}" "branch rename" "${c_reset}" "Renombra la rama Git actual con los datos del issue"
 
-AUTENTICACIÓN:
-  Basic Auth (3 formas):
-    1. JIRA_AUTH=basic + JIRA_TOKEN=<base64_de_user:pass>
-    2. JIRA_AUTH=basic + JIRA_USER=<user> + JIRA_PASSWORD=<pass>
-    3. JIRA_AUTH=basic + JIRA_EMAIL=<email> + JIRA_API_TOKEN=<token>
-  
-  Bearer Auth:
-    JIRA_AUTH=bearer + JIRA_TOKEN=<oauth_token>
-  
-  Auto-detección (sin JIRA_AUTH):
-    - Si JIRA_TOKEN decodifica a user:pass → Basic Auth
-    - Si JIRA_TOKEN no decodifica → Bearer Auth
+  echo -e " ${c_yellow}comment${c_reset}"
+  printf "  %b%-24s%b %s\n" "${c_green}" "comment" "${c_reset}" "Agrega un comentario al issue (-m texto, @archivo o -)"
+  printf "  %b%-24s%b %s\n" "${c_green}" "comment list" "${c_reset}" "Lista comentarios de un issue (alias: issue comments)"
 
-FORMATOS DE SALIDA:
-  json               - JSON formateado (por defecto)
-  csv                - Valores separados por comas
-  table              - Tabla con columnas separadas por tabs
-  yaml               - Formato YAML
-  md                 - Tabla en formato Markdown
+  echo -e " ${c_yellow}issue${c_reset}"
+  printf "  %b%-24s%b %s\n" "${c_green}" "issue <key>" "${c_reset}" "Visualiza la información completa de un issue"
+  printf "  %b%-24s%b %s\n" "${c_green}" "issue link" "${c_reset}" "Enlaza dos issues (blocks, relates to, etc.)"
+  printf "  %b%-24s%b %s\n" "${c_green}" "issue pending" "${c_reset}" "Lista issues asignados que no están en Done (alias: pending)"
+  printf "  %b%-24s%b %s\n" "${c_green}" "issue move" "${c_reset}" "Mueve/clona un issue hacia otro proyecto"
+  printf "  %b%-24s%b %s\n" "${c_green}" "issue view" "${c_reset}" "Muestra vista formateada (--resume, --full, --fields)"
 
-EJEMPLOS:
-  # Sintaxis simplificada
-  jira priority --output table
-  jira project CORE --output json
-  jira project components PROJ
-  jira project statuses PROJ
-  jira workflow --output table
-  jira issue ABC-123
-  jira issue ABC-123 --transitions
-  jira issue ABC-123 --transitions --to 611
-  jira issue ABC-123 --assign me              # Asignar a mi usuario
-  jira issue ABC-123 --assign user@dom.com    # Asignar a usuario específico
-  jira issue ABC-123 --unassign               # Dejar sin asignación
-  jira issue comment ABC-123 -m "Comentario"  # Agrega comentario
-  jira issue comment ABC-123 -m "@file.txt"   # Comentario desde archivo
-  echo "mensaje" | jira issue comment ABC-123 -m -  # Comentario desde pipe
-  jira create --data '{"fields":{"project":{"key":"ABC"},"summary":"Nuevo ticket","issuetype":{"name":"Task"}}}'
-  jira create --data ./payload.json
-  jira create --data ./payload.json --priority High --assignee user1
-  jira create --project ABC --summary "Titulo" --description "Desc" --type Task
-  jira user carlos.herrera
+  echo -e " ${c_yellow}link${c_reset}"
+  printf "  %b%-24s%b %s\n" "${c_green}" "link-url" "${c_reset}" "Vincula URLs remotas (GitLab MR, PR, docs) al issue"
+  printf "  %b%-24s%b %s\n" "${c_green}" "link-url list" "${c_reset}" "Lista los enlaces web remotos del issue"
 
-  # Sintaxis tradicional
-  jira GET /priority --output table
-  jira GET /project/CORE
-  jira GET '/search?jql=assignee=currentUser()'
-  jira POST /issue --data '{"fields":{"summary":"Test"}}'
+  echo -e " ${c_yellow}project${c_reset}"
+  printf "  %b%-24s%b %s\n" "${c_green}" "project [id]" "${c_reset}" "Obtiene información o lista todos los proyectos"
+  printf "  %b%-24s%b %s\n" "${c_green}" "project components" "${c_reset}" "Lista, exporta o importa componentes de un proyecto"
+  printf "  %b%-24s%b %s\n" "${c_green}" "project statuses" "${c_reset}" "Muestra workflows y estados configurados del proyecto"
 
-  # Con opciones personalizadas
-  jira priority --token abc123 --host https://mi-jira.com
-  jira project --output yaml
-  jira search 'assignee=currentUser()' --output md
+  echo -e " ${c_yellow}transition${c_reset}"
+  printf "  %b%-24s%b %s\n" "${c_green}" "transition <key>" "${c_reset}" "Muestra o ejecuta transiciones de estado en un issue"
+  printf "  %b%-24s%b %s\n" "${c_green}" "done <key>" "${c_reset}" "Transiciona un issue directamente a Done / Finalizado"
+  printf "  %b%-24s%b %s\n" "${c_green}" "redo <key>" "${c_reset}" "Reabre o transiciona un issue a In Progress"
 
-  # Autocompletado (instalar una vez)
-  jira --shell bash > ~/.jira-completion.bash
-  jira --shell zsh > ~/.jira-completion.zsh
+  echo -e " ${c_yellow}user${c_reset}"
+  printf "  %b%-24s%b %s\n" "${c_green}" "user search <query>" "${c_reset}" "Busca usuarios por nombre, email o username"
+  printf "  %b%-24s%b %s\n" "${c_green}" "user get <user>" "${c_reset}" "Obtiene el perfil completo de un usuario por email o ID"
+  printf "  %b%-24s%b %s\n" "${c_green}" "user activity" "${c_reset}" "Resumen de actividad reciente del usuario"
 
-NOTAS:
-  - Usa comillas simples para URLs con caracteres especiales
-  - El formato table es útil para pipes con cut, awk, etc.
-  - El formato md es perfecto para documentación
-  - Sin autenticación algunas APIs pueden requerir login
+  echo -e " ${c_yellow}worklog${c_reset}"
+  printf "  %b%-24s%b %s\n" "${c_green}" "worklog <key> <time>" "${c_reset}" "Registra tiempo trabajado en un issue (ej: 1h 30m)"
+  printf "  %b%-24s%b %s\n" "${c_green}" "worklog list <key>" "${c_reset}" "Lista las entradas de horas registradas en un issue"
 
-EOF
+  echo -e " ${c_yellow}system${c_reset}"
+  printf "  %b%-24s%b %s\n" "${c_green}" "completion" "${c_reset}" "Genera script de autocompletado (--shell bash|zsh)"
+  printf "  %b%-24s%b %s\n" "${c_green}" "issuetype" "${c_reset}" "Lista todos los tipos de issue disponibles"
+  printf "  %b%-24s%b %s\n" "${c_green}" "priority" "${c_reset}" "Lista todas las prioridades configuradas"
+  printf "  %b%-24s%b %s\n" "${c_green}" "status" "${c_reset}" "Lista todos los estados disponibles"
+  printf "  %b%-24s%b %s\n" "${c_green}" "workflow" "${c_reset}" "Lista workflows configurados"
 }
 
 # Specific help for 'jira user'
@@ -383,6 +355,7 @@ Comandos:
   pending            Lista issues asignados a ti que no están en Done
 
 Opciones:
+  --data '{json}'    Actualiza el issue con payload JSON o ruta a archivo
   --resume|--resumen Muestra resumen del issue (campos clave)
   --fields EXPR      Campos a mostrar (expresión jq)
   --full             Muestra todos los campos
@@ -402,6 +375,8 @@ Opciones:
 Ejemplos:
   jira issue                      # Lista issues asignados a ti
   jira issue ABC-123              # Obtiene el issue ABC-123
+  jira ABC-123 --data '{"summary":"Nuevo título"}' # Actualiza issue
+  jira ABC-123 --data ./update.json                # Actualiza issue desde archivo
   jira issue ABC-123 --move PROJ2 # Clona ABC-123 en el proyecto PROJ2
   jira ABC-123 --move PROJ2      # Mismo efecto (atajo)
   jira move ABC-123 --to-project PROJ2 --components Frontend,Backend --yes
@@ -1377,8 +1352,25 @@ if [[ $# -gt 0 && ("$1" == "--version" || "$1" == "-V") ]]; then
   jira_print_version
   exit 0
 fi
-if [[ $# -gt 0 && ("$1" == "self-update" || "$1" == "update") ]]; then
+if [[ $# -gt 0 && "$1" == "self-update" ]]; then
   shift
+  jira_self_update_main "$@"
+  exit $?
+fi
+if [[ $# -gt 0 && "$1" == "update" ]]; then
+  shift
+  # If an issue key is passed, route to issue editing/updating
+  _has_ticket=false
+  for _arg in "$@"; do
+    if [[ "$_arg" =~ ^[A-Za-z0-9_]+-[0-9]+$ ]]; then
+      _has_ticket=true
+      break
+    fi
+  done
+  if [[ "$_has_ticket" == "true" ]]; then
+    jira_issue_edit_main "$@"
+    exit $?
+  fi
   jira_self_update_main "$@"
   exit $?
 fi
@@ -1423,6 +1415,12 @@ for _help_arg in "$@"; do
     fi
   fi
 done
+
+# If no arguments provided ("jira a secas"), show help (Laravel Artisan style)
+if [[ $# -eq 0 ]]; then
+  show_help
+  exit 0
+fi
 
 # Fast-dispatch for modular domain commands (KISS & DRY)
 if [[ $# -ge 1 ]]; then
@@ -1499,6 +1497,21 @@ fi
 
 # Hierarchical dispatch with 'issue' as first argument
 if [[ $# -ge 2 && "$1" =~ ^(issue|issues)$ ]]; then
+  if [[ "$2" =~ ^[A-Za-z0-9_]+-[0-9]+$ ]]; then
+    _has_edit_intent=false
+    for _arg in "${@:3}"; do
+      if [[ "$_arg" == "--data" || "$_arg" =~ ^--data= || "$_arg" =~ ^(-s|--summary|--summary=|-d|--description|--description=|-P|--priority|--priority=|-a|--assignee|--assignee=|-r|--reporter|--reporter=|-e|--epic|--epic=|-f|--field|--add-label|--add-labels|--remove-label|--remove-labels|--add-component|--add-components|--remove-component|--remove-components|--description-file|--description-file=)$ ]]; then
+        _has_edit_intent=true
+        break
+      fi
+    done
+    if [[ "$_has_edit_intent" == "true" ]]; then
+      _t_key="$2"
+      shift 2
+      jira_issue_edit_main "$_t_key" "$@"
+      exit $?
+    fi
+  fi
   case "$2" in
     branch|branches)
       shift 2
@@ -1530,7 +1543,7 @@ if [[ $# -ge 2 && "$1" =~ ^(issue|issues)$ ]]; then
       jira_worklog_main "$@"
       exit $?
       ;;
-    edit|modify)
+    edit|modify|update)
       shift 2
       jira_issue_edit_main "$@"
       exit $?
@@ -1587,6 +1600,23 @@ if [[ $# -ge 1 && "$1" =~ ^[A-Za-z0-9_]+-[0-9]+$ ]]; then
       exit $?
       ;;
   esac
+
+  # Direct issue update: jira PROJ-123 --data ... or with edit flags
+  _has_edit_intent=false
+  for _arg in "${@:2}"; do
+    if [[ "$_arg" == "--data" || "$_arg" =~ ^--data= || "$_arg" =~ ^(-s|--summary|--summary=|-d|--description|--description=|-P|--priority|--priority=|-a|--assignee|--assignee=|-r|--reporter|--reporter=|-e|--epic|--epic=|-f|--field|--add-label|--add-labels|--remove-label|--remove-labels|--add-component|--add-components|--remove-component|--remove-components|--description-file|--description-file=)$ ]]; then
+      _has_edit_intent=true
+      break
+    fi
+  done
+  if [[ "$_has_edit_intent" == "true" ]]; then
+    shift
+    jira_issue_edit_main "$_ticket_key" "$@"
+    exit $?
+  fi
+
+  # Fallback: normalize "jira KEY ..." to "jira issue KEY ..." for other issue options
+  set -- issue "$_ticket_key" "${@:2}"
 fi
 
 # Normalize move syntax so the rest of the script sees "issue KEY --move PROJ"

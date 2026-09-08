@@ -4,6 +4,7 @@
 
 jira_issue_edit_main() {
     local ISSUE_KEY=""
+    local DATA=""
     local SUMMARY=""
     local DESCRIPTION=""
     local DESCRIPTION_FILE=""
@@ -33,6 +34,22 @@ jira_issue_edit_main() {
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --data)
+                DATA="$2"; shift 2 ;;
+            --data=*)
+                DATA="${1#*=}"; shift ;;
+            --host)
+                export JIRA_HOST="$2"; shift 2 ;;
+            --host=*)
+                export JIRA_HOST="${1#*=}"; shift ;;
+            --jira-host=*)
+                export JIRA_HOST="${1#*=}"; shift ;;
+            --token)
+                export JIRA_TOKEN="$2"; shift 2 ;;
+            --token=*)
+                export JIRA_TOKEN="${1#*=}"; shift ;;
+            --jira-token=*)
+                export JIRA_TOKEN="${1#*=}"; shift ;;
             -s|--summary)
                 SUMMARY="$2"; shift 2 ;;
             --summary=*)
@@ -121,7 +138,89 @@ jira_issue_edit_main() {
     local payload_file
     payload_file=$(mktemp)
     trap 'rm -f "$payload_file"' RETURN
-    echo '{"fields":{},"update":{}}' > "$payload_file"
+
+    if [[ -n "$DATA" ]]; then
+        local raw_json=""
+        if [[ "$DATA" == "-" ]]; then
+            if [[ ! -t 0 ]]; then
+                raw_json=$(cat)
+            else
+                error "No data provided on stdin."
+                return 1
+            fi
+        elif [[ -f "$DATA" ]]; then
+            raw_json=$(cat "$DATA")
+        elif [[ "$DATA" == @* && -f "${DATA#@}" ]]; then
+            raw_json=$(cat "${DATA#@}")
+        elif printf '%s' "$DATA" | jq -e . >/dev/null 2>&1; then
+            raw_json="$DATA"
+        else
+            error "Invalid --data: must be an existing JSON file, '-' for stdin, or a valid JSON string: $DATA"
+            return 1
+        fi
+
+        if [[ -z "$raw_json" ]]; then
+            error "Provided --data is empty."
+            return 1
+        fi
+
+        if ! printf '%s' "$raw_json" | jq -e . >/dev/null 2>&1; then
+            error "Invalid JSON content provided in --data."
+            return 1
+        fi
+
+        # Normalize JSON: if flat object without fields/update, wrap in fields
+        local normalized_json
+        normalized_json=$(printf '%s' "$raw_json" | jq '
+            if type == "object" then
+                if has("fields") or has("update") then
+                    {fields: (.fields // {}), update: (.update // {})} + del(.fields, .update)
+                else
+                    {fields: ., update: {}}
+                end
+            else
+                error("JSON payload must be an object")
+            end
+        ') || {
+            error "JSON payload must be an object."
+            return 1
+        }
+
+        # Normalize priority if string: "High" -> {"name": "High"}
+        normalized_json=$(printf '%s' "$normalized_json" | jq '
+            if (.fields.priority? | type) == "string" then
+                .fields.priority = {name: .fields.priority}
+            else . end
+        ')
+
+        # Normalize issuetype if string: "Bug" -> {"name": "Bug"}
+        normalized_json=$(printf '%s' "$normalized_json" | jq '
+            if (.fields.issuetype? | type) == "string" then
+                .fields.issuetype = {name: .fields.issuetype}
+            else . end
+        ')
+
+        # Normalize description if string in fields
+        local desc_type
+        desc_type=$(printf '%s' "$normalized_json" | jq -r '.fields.description? | type // empty')
+        if [[ "$desc_type" == "string" ]]; then
+            local desc_val
+            desc_val=$(printf '%s' "$normalized_json" | jq -r '.fields.description')
+            if [[ "${JIRA_API_VERSION:-3}" == "3" ]]; then
+                local adf_doc
+                adf_doc=$(jira_text_to_adf "$desc_val")
+                normalized_json=$(printf '%s' "$normalized_json" | jq --argjson desc "$adf_doc" '.fields.description = $desc')
+            else
+                local wiki_doc
+                wiki_doc=$(markdown_to_jira "$desc_val" 2>/dev/null || printf '%s' "$desc_val")
+                normalized_json=$(printf '%s' "$normalized_json" | jq --arg desc "$wiki_doc" '.fields.description = $desc')
+            fi
+        fi
+
+        printf '%s' "$normalized_json" > "$payload_file"
+    else
+        echo '{"fields":{},"update":{}}' > "$payload_file"
+    fi
 
     if [[ -n "$SUMMARY" ]]; then
         jq --arg s "$SUMMARY" '.fields.summary = $s' "$payload_file" > "${payload_file}.tmp" && mv "${payload_file}.tmp" "$payload_file"
@@ -224,5 +323,9 @@ jira_issue_edit_main() {
     info "Updating issue $ISSUE_KEY..."
     local resp
     resp=$("$jira_bin" PUT "/issue/${ISSUE_KEY}" --data "$payload_file")
+    if printf '%s' "$resp" | jq -e 'if type == "object" and (has("errorMessages") or has("errors")) then true else false end' >/dev/null 2>&1; then
+        error "Failed to update issue $ISSUE_KEY: $resp"
+        return 1
+    fi
     success "Issue $ISSUE_KEY updated successfully."
 }

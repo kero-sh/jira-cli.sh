@@ -47,6 +47,52 @@ assert_eq "Remove component" "OldCore" "$(echo "$dry_comps" | jq -r '.update.com
 dry_cf=$("$JIRA_BIN" edit PROJ-100 --field customfield_10014=EPIC-500 --dry-run 2>/dev/null)
 assert_eq "Custom field assignment" "EPIC-500" "$(echo "$dry_cf" | jq -r '.fields.customfield_10014 // empty')"
 
+# --data with nested fields
+dry_data_nested=$("$JIRA_BIN" edit PROJ-100 --data '{"fields":{"summary":"Data Nested","priority":{"name":"Low"}}}' --dry-run 2>/dev/null)
+assert_eq "Data nested summary" "Data Nested" "$(echo "$dry_data_nested" | jq -r '.fields.summary // empty')"
+assert_eq "Data nested priority" "Low" "$(echo "$dry_data_nested" | jq -r '.fields.priority.name // empty')"
+
+# --data with flat fields (auto-wrap in fields and normalize priority)
+dry_data_flat=$("$JIRA_BIN" edit PROJ-100 --data '{"summary":"Flat Summary","priority":"Medium"}' --dry-run 2>/dev/null)
+assert_eq "Data flat summary wrapped" "Flat Summary" "$(echo "$dry_data_flat" | jq -r '.fields.summary // empty')"
+assert_eq "Data flat priority normalized" "Medium" "$(echo "$dry_data_flat" | jq -r '.fields.priority.name // empty')"
+
+# --data with file
+tmp_json=$(mktemp --suffix=.json)
+echo '{"summary":"From File","priority":"High"}' > "$tmp_json"
+dry_data_file=$("$JIRA_BIN" edit PROJ-100 --data "$tmp_json" --dry-run 2>/dev/null)
+assert_eq "Data from file summary" "From File" "$(echo "$dry_data_file" | jq -r '.fields.summary // empty')"
+assert_eq "Data from file priority" "High" "$(echo "$dry_data_file" | jq -r '.fields.priority.name // empty')"
+rm -f "$tmp_json"
+
+# --data with stdin
+dry_data_stdin=$(echo '{"summary":"From Stdin"}' | "$JIRA_BIN" edit PROJ-100 --data - --dry-run 2>/dev/null)
+assert_eq "Data from stdin summary" "From Stdin" "$(echo "$dry_data_stdin" | jq -r '.fields.summary // empty')"
+
+# --data with CLI override
+dry_data_override=$("$JIRA_BIN" edit PROJ-100 --data '{"summary":"Initial","priority":"Low"}' --summary "Overridden" --dry-run 2>/dev/null)
+assert_eq "Data override summary" "Overridden" "$(echo "$dry_data_override" | jq -r '.fields.summary // empty')"
+assert_eq "Data override preserves priority" "Low" "$(echo "$dry_data_override" | jq -r '.fields.priority.name // empty')"
+
+# --data error handling
+err_invalid_json=$("$JIRA_BIN" edit PROJ-100 --data '{bad json' --dry-run 2>&1 || true)
+total=$((total + 1))
+if echo "$err_invalid_json" | grep -qi "invalid --data"; then
+  echo "  ✓ Reject invalid JSON: PASS"
+else
+  echo "  ✗ Reject invalid JSON: FAIL"
+  failed=$((failed + 1))
+fi
+
+err_missing_file=$("$JIRA_BIN" edit PROJ-100 --data "/nonexistent/path/file.json" --dry-run 2>&1 || true)
+total=$((total + 1))
+if echo "$err_missing_file" | grep -qi "invalid --data"; then
+  echo "  ✓ Reject nonexistent file: PASS"
+else
+  echo "  ✗ Reject nonexistent file: FAIL"
+  failed=$((failed + 1))
+fi
+
 echo
 echo "Results: $((total - failed))/$total passed"
 if [ $failed -gt 0 ]; then

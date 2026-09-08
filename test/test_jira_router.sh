@@ -49,6 +49,35 @@ assert_contains "jira PROJ-123 --link-url routes to remote link" "https://gitlab
 out_del=$(JIRA_HOST="https://jira.example.com" "$JIRA_BIN" DELETE /issue/PROJ-123 --dry-run 2>&1)
 assert_contains "jira DELETE /endpoint is accepted" "DRY-RUN" "$out_del"
 
+# Shortcut: jira PROJ-123 --data '{"summary":"Direct Key Data"}'
+out_direct_data=$("$JIRA_BIN" PROJ-123 --data '{"summary":"Direct Key Data"}' --dry-run 2>&1)
+assert_contains "jira PROJ-123 --data routes to edit" "Direct Key Data" "$out_direct_data"
+assert_contains "jira PROJ-123 --data uses PUT" "PUT /issue/PROJ-123" "$out_direct_data"
+
+# Shortcut: jira PROJ-123 --dry-run --data '{"summary":"Reversed Flags"}'
+out_rev_data=$("$JIRA_BIN" PROJ-123 --dry-run --data '{"summary":"Reversed Flags"}' 2>&1)
+assert_contains "jira PROJ-123 with flags before --data routes to edit" "Reversed Flags" "$out_rev_data"
+
+# Hierarchical: jira issue PROJ-123 --data '{"summary":"Via Issue"}'
+out_issue_data=$("$JIRA_BIN" issue PROJ-123 --data '{"summary":"Via Issue"}' --dry-run 2>&1)
+assert_contains "jira issue PROJ-123 --data routes to edit" "Via Issue" "$out_issue_data"
+
+# Direct edit flags on ticket key: jira PROJ-123 --summary "Direct Summary"
+out_direct_summary=$("$JIRA_BIN" PROJ-123 --summary "Direct Summary" --dry-run 2>&1)
+assert_contains "jira PROJ-123 --summary routes to edit" "Direct Summary" "$out_direct_summary"
+
+# Fallback normalization: jira PROJ-123 --transitions
+out_ticket_transitions=$(JIRA_HOST="https://jira.example.com" "$JIRA_BIN" PROJ-123 --transitions --dry-run 2>&1)
+assert_contains "jira PROJ-123 --transitions normalizes to issue transitions" "/issue/PROJ-123/transitions" "$out_ticket_transitions"
+
+# Alias: jira update [ticket]
+out_update_data=$("$JIRA_BIN" update PROJ-123 --data '{"summary":"Update Alias"}' --dry-run 2>&1)
+assert_contains "jira update PROJ-123 routes to edit" "Update Alias" "$out_update_data"
+
+# Hierarchical alias: jira issue update [ticket]
+out_issue_update=$("$JIRA_BIN" issue update PROJ-123 --summary "Issue Update Alias" --dry-run 2>&1)
+assert_contains "jira issue update PROJ-123 routes to edit" "Issue Update Alias" "$out_issue_update"
+
 echo
 echo "Results: $((total - failed))/$total passed"
 if [ $failed -gt 0 ]; then
