@@ -38,6 +38,9 @@ source "$DIR/../lib/jira.adf.sh"
 
 set -e
 
+# Register non-intrusive update notification on EXIT (channel: stderr only, never stdout/stdio)
+jira_setup_exit_version_check "$@"
+
 DRY_RUN=false
 # Default values
 JIRA_HOST="${JIRA_HOST:-}"
@@ -150,7 +153,7 @@ show_help() {
   if command -v jira_read_installed_version >/dev/null 2>&1; then
     version="$(jira_read_installed_version)"
   fi
-  [[ -z "$version" ]] && version="1.11.0"
+  [[ -z "$version" ]] && version="1.12.0"
 
   local use_color=false
   # Detect color support (Artisan / Symfony Console style)
@@ -2272,8 +2275,6 @@ if [[ "$SHOW_HELP_FLAG" == "true" ]] && [[ -z "$resource" ]]; then
   show_help
   exit 0
 fi
-
-jira_passive_version_check "$@"
 
 if [[ "$resource" == "create" && ${#CREATE_EXTRA_ARGS[@]} -gt 0 ]]; then
   jira_create_main "${CREATE_EXTRA_ARGS[@]}" "$@"
